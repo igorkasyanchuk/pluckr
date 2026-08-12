@@ -80,7 +80,9 @@ bin/console    # IRB with dev/ loaded
 
 `dev/` is a throwaway application: `schema.rb`, `models.rb`, `seeds.rb`
 (deterministic), `queries.rb` (example read models) and `console_helpers.rb`
-(`sql`, `explain`, `statements`). It is not part of the gem - `pluckr.gemspec`
+(`sql`, `explain`, `statements`, `reload!`). The console logs every statement by
+default (`Dev.log!(false)` to stop) and `reload!` re-loads `lib/` plus `dev/`, so
+gem edits can be tried without restarting. It is not part of the gem - `pluckr.gemspec`
 only ships `lib/`. Query classes validate columns as they load, so `dev/boot.rb`
 requires `queries.rb` only once the schema exists.
 

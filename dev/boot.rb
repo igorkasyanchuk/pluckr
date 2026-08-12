@@ -100,10 +100,26 @@ module Dev
     Seeds.run(users: users)
   end
 
-  # Echo every statement to stdout - handy while poking at queries in the console.
+  # Echo every statement to stdout. On by default in bin/console.
   def log!(enabled = true)
     ActiveRecord::Base.logger = enabled ? Logger.new($stdout, formatter: ->(_, _, _, msg) { "#{msg}\n" }) : nil
     enabled
+  end
+
+  # Re-load the gem and the sandbox files, so edits to lib/ or dev/ take effect
+  # without restarting the console. Use reset! instead if dev/schema.rb changed.
+  def reload!
+    files = Dir[File.join(ROOT, "lib", "pluckr", "**", "*.rb")].sort +
+            [File.join(ROOT, "lib", "pluckr.rb")] +
+            %w[models queries console_helpers].map { |name| File.join(ROOT, "dev", "#{name}.rb") }
+
+    warn_level = $VERBOSE
+    $VERBOSE = nil # reopening classes re-assigns their constants
+    files.each { |file| load file }
+    $VERBOSE = warn_level
+
+    puts "reloaded #{files.size} files"
+    true
   end
 
   def counts

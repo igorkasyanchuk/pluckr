@@ -341,10 +341,19 @@ subscriptions have no plan - so `nil` versus NULL is visible immediately.
 | `sql(query)` | print the generated SQL, split across clauses |
 | `explain(query)` | `EXPLAIN` it (`analyze: true` for `EXPLAIN ANALYZE` on PostgreSQL) |
 | `statements { ... }` | print and count the statements a block executes |
+| `reload!` | pick up edits to `lib/` and `dev/` without restarting |
 | `reseed!(users: 500)` | wipe and re-seed |
 | `reset!` | reload the schema, then re-seed |
-| `Dev.log!` | echo every statement to stdout |
+| `Dev.log!(false)` | stop echoing SQL (`Dev.log!` turns it back on) |
 | `Dev.counts` | row counts per table |
+
+Every statement is logged to stdout by default, so you see exactly what Pluckr
+sends:
+
+```
+>> UserSummary.where(active: true).limit(2).fetch
+  UserSummary Pluckr (0.6ms)  SELECT "users"."id" AS "id", ... LIMIT 2
+```
 
 ### What is in `dev/`
 
@@ -357,12 +366,17 @@ subscriptions have no plan - so `nil` versus NULL is visible immediately.
 | `dev/console_helpers.rb` | the helpers above |
 | `dev/boot.rb` | connection, `Dev.reset!`, `Dev.seed!`, `Dev.log!` |
 
-Edit `dev/queries.rb` and pick the changes up without leaving the session:
+Edit `dev/queries.rb` - or the gem itself - and pick the changes up without
+leaving the session:
 
 ```ruby
->> load "dev/queries.rb"
+>> reload!
+reloaded 20 files
 >> sql UserSummary.limit(1)
 ```
+
+`reload!` re-loads `lib/pluckr/**` and the sandbox files. Use `reset!` instead
+when `dev/schema.rb` changed, since that needs the tables rebuilt.
 
 ### Another database
 

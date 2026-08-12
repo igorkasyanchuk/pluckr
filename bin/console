@@ -32,8 +32,16 @@ puts <<~BANNER
     DashboardStats.fetch.to_h
 
   Helpers:  sql(query)  explain(query, analyze: true)  statements { ... }
-            reseed!  reset!  Dev.log!  Dev.counts
+            reload!   pick up edits to lib/ and dev/queries.rb
+            reseed!   wipe and re-seed        reset!  reload schema, then re-seed
+            Dev.counts
+
+  SQL logging is on. Dev.log!(false) turns it off, Dev.log! turns it back on.
 
 BANNER
+
+# Echo every statement, so you can see what Pluckr actually sends. Enabled after
+# the banner so the row counts above do not scroll past.
+Dev.log!
 
 IRB.start

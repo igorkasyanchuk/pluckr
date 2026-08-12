@@ -39,6 +39,11 @@ module Kernel
     ActiveSupport::Notifications.unsubscribe(subscriber)
   end
 
+  # Pick up edits to lib/ and dev/ without restarting IRB.
+  def reload!
+    Dev.reload!
+  end
+
   def reseed!(users: 20)
     Dev.seed!(users: users)
   end
