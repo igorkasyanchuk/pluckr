@@ -14,6 +14,7 @@ class User < ActiveRecord::Base
   has_many :direct_reports, class_name: "User", foreign_key: :manager_id
   has_many :orders
   has_many :likes, as: :likeable
+  has_many :photo_likes, through: :photos, source: :likes
   has_many :archived_comments, class_name: "ArchivedComment", foreign_key: :user_id
 end
 
@@ -65,6 +66,7 @@ end
 class Photo < ActiveRecord::Base
   belongs_to :user
   has_many :likes, as: :likeable
+  has_many :photo_likes, through: :photos, source: :likes
 end
 
 class Like < ActiveRecord::Base

@@ -39,8 +39,15 @@ module Pluckr
         case node
         when Schema::Field then model.type_for_attribute(node.column)
         when Schema::Exists then BOOLEAN
-        when Schema::Aggregate
-          node.operation == :count ? INTEGER : node.target_model.type_for_attribute(node.column)
+        when Schema::Aggregate then aggregate_caster(node)
+        end
+      end
+
+      def aggregate_caster(node)
+        case node.operation
+        when :count then INTEGER
+        when :exists then BOOLEAN
+        else node.target_model.type_for_attribute(node.column)
         end
       end
 

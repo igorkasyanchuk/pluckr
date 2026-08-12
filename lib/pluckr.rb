@@ -17,6 +17,7 @@ require "pluckr/compiler/sql"
 require "pluckr/result/object"
 require "pluckr/result/builder"
 require "pluckr/relation"
+require "pluckr/batch"
 require "pluckr/query"
 
 # A declarative read-query layer for ActiveRecord.

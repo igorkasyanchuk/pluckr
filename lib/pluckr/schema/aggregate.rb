@@ -10,15 +10,21 @@ module Pluckr
     # Both compile to a scalar subquery in the SELECT list, never to a JOIN +
     # GROUP BY, so root rows are never multiplied.
     class Aggregate < Node
-      OPERATIONS = %i[count sum min max].freeze
+      OPERATIONS = %i[count sum min max exists].freeze
 
-      attr_reader :operation, :association, :model, :column, :where, :scope
+      attr_reader :operation, :association, :model, :relation, :column, :where, :scope
 
-      def initialize(output:, operation:, association: nil, model: nil, column: nil, where: nil, scope: nil)
+      def initialize(output:, operation:, association: nil, model: nil, relation: nil,
+                     column: nil, where: nil, scope: nil)
         super(output: output)
         @operation = operation.to_sym
+        unless OPERATIONS.include?(@operation)
+          raise ConfigurationError, "unsupported aggregate operation `#{operation}`"
+        end
+
         @association = association
         @model = model
+        @relation = relation
         @column = column&.to_sym
         @where = where ? where.dup.freeze : nil
         @scope = scope
@@ -27,7 +33,7 @@ module Pluckr
 
       # Independent aggregates are not rooted in the source record.
       def independent?
-        !model.nil?
+        !model.nil? || !relation.nil?
       end
 
       def correlated?
@@ -42,7 +48,7 @@ module Pluckr
 
       # Target model for column validation / table resolution.
       def target_model
-        model || association.klass
+        model || relation&.klass || association.klass
       end
     end
   end

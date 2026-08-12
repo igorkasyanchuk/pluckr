@@ -17,4 +17,8 @@
   from hashing the subquery into a full scan of the child table.
 - Scoped correlated aggregates read through a derived table, so a scope may join
   (or be) the table it correlates to.
+- `Pluckr.batch { |b| b.count relation, as: :name }` - ad-hoc aggregates over
+  relations the caller already built, in one statement. Respects everything
+  ActiveRecord applied, including `:through`, polymorphic, scoped and
+  `default_scope`d associations.
 - Benchmarks in `benchmarks/read_models.rb`, results in `BENCHMARKS.md`.

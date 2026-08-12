@@ -33,10 +33,10 @@ module Pluckr
         relation.select(*build.projections).joins(build.joins)
       end
 
-      # Single-statement SQL for aggregate-only (dashboard) queries.
+      # Single-statement SQL for aggregate-only (dashboard and batch) queries.
       def aggregate_only_sql
-        parts = schema.nodes.map do |node|
-          "#{scalar_subquery(node)} AS #{quote_alias(node.output)}"
+        parts = schema.nodes.map.with_index(1) do |node, index|
+          "#{scalar_subquery(node, index)} AS #{quote_alias(node.output)}"
         end
 
         "SELECT #{parts.join(", ")}"
@@ -150,7 +150,9 @@ module Pluckr
       #
       # Conditions are delegated to ActiveRecord, so values are quoted by the
       # adapter - never string-interpolated here.
-      def scalar_subquery(node)
+      def scalar_subquery(node, index = 1)
+        return relation_subquery(node, index) if node.relation
+
         relation = aggregate_relation(node, node.model.all)
         relation = relation.select(aggregate_function(node, node.model.arel_table))
 
@@ -163,6 +165,23 @@ module Pluckr
       #      FROM (SELECT photos.* FROM photos INNER JOIN users ...) pluckr_sub_1
       #     WHERE pluckr_sub_1.user_id = users.id)
       #
+      # An aggregate over a relation the caller already built. Its SQL is used
+      # verbatim, inside a derived table, so whatever ActiveRecord applied -
+      # default scopes, association scopes, :through joins, STI conditions -
+      # stays applied, and `limit`/`group` keep their meaning.
+      #
+      #   (SELECT COUNT(*) FROM (SELECT videos.* FROM videos WHERE ...) pluckr_batch_1)
+      def relation_subquery(node, index)
+        name = "#{Aliases::TABLE_PREFIX}_batch_#{index}"
+        derived = Arel::Table.new(name)
+        from = Arel.sql("(#{node.relation.to_sql}) #{connection.quote_table_name(name)}")
+
+        return Arel.sql("EXISTS (#{Arel::SelectManager.new.from(from).project(Arel.sql("1")).take(1).to_sql})") if
+          node.operation == :exists
+
+        Arel.sql("(#{Arel::SelectManager.new.from(from).project(aggregate_function(node, derived)).to_sql})")
+      end
+
       # `where:`/`scope:` conditions name the model's real table, which may be the
       # table being correlated to (a self-referential association) or one the scope
       # joins in. Nesting them inside a derived table keeps those names in their own

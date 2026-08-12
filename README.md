@@ -136,6 +136,48 @@ SELECT (SELECT COUNT(*) FROM "users") AS "users",
 
 One round trip. `where:` values go through ActiveRecord quoting.
 
+## Ad-hoc aggregates
+
+`Pluckr::Query` is for read models you define once and reuse. When the
+aggregates are decided at runtime - a detail page, a per-user summary, filters
+from params - `Pluckr.batch` takes relations you already have and answers them
+all in one statement:
+
+```ruby
+stats = Pluckr.batch do |b|
+  b.count  user.videos,                          as: :video_count
+  b.sum    user.videos.where(size: 100..), :size, as: :big_video_bytes
+  b.exists user.photos,                          as: :has_photos
+  b.count  Account.active,                       as: :active_accounts
+end
+
+stats.video_count      # => 3
+stats.has_photos       # => true
+stats.to_h             # => {video_count: 3, big_video_bytes: 4200, ...}
+```
+
+```sql
+SELECT (SELECT COUNT(*) FROM (SELECT "videos".* FROM "videos"
+                               WHERE "videos"."user_id" = 1) "pluckr_batch_1") AS "video_count",
+       ...
+```
+
+Each entry is the SQL **ActiveRecord already built**, wrapped in a derived
+table. Whatever was applied to the relation stays applied: `default_scope`,
+association scopes, `has_many :through`, polymorphic and STI conditions,
+`joins`, `merge`, `distinct`, `group`, `limit`. The associations the schema DSL
+refuses to compile all work here, because Pluckr is not deriving the join - it
+is reading the relation's own `to_sql`.
+
+`count`, `sum`, `min`, `max` and `exists` are available; `as:` is always
+required. A model class works where a relation does (`b.count User, as: :users`).
+`Pluckr::Batch.build { ... }` returns the batch unexecuted, with `#to_sql` and
+`#fetch`.
+
+The trade-off against a `Pluckr::Query`: a batch is bound to concrete records,
+so it answers *one* subject per call. To fill a column across the rows of an
+index page, define a query.
+
 ## DSL
 
 | Node | Result | SQL |
@@ -276,7 +318,8 @@ The compiler never sees DSL state, so new node types are additive.
 - `has_many :through`, polymorphic `belongs_to`, associations with their own
   scope, and associations whose model has a `default_scope` (these raise
   `Pluckr::UnsupportedAssociation` rather than silently ignoring the scope).
-  Polymorphic `has_many ..., as:` targets and STI children *are* supported.
+  Polymorphic `has_many ..., as:` targets and STI children *are* supported, and
+  `Pluckr.batch` handles all of them, since ActiveRecord builds the SQL.
 - writes, serializers, pagination beyond `limit`/`offset`, caching
 
 ## What Pluckr is not

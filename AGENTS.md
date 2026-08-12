@@ -13,6 +13,7 @@ SQLite.
 lib/pluckr/
   query.rb                   class-level API: source, schema, find, fetch, first, to_sql
   relation.rb                immutable chaining + WhereChain, delegates root filtering to AR
+  batch.rb                   Pluckr.batch - ad-hoc aggregates over caller-supplied relations
   schema/definition.rb       evaluates the DSL, validates, builds the AST
   schema/scope.rb            one level of the AST (the nodes selected for one model)
   schema/{field,one,exists,aggregate,node}.rb   AST nodes
@@ -33,6 +34,12 @@ Pipeline: `DSL -> schema AST -> reflection -> SQL compiler -> flat row -> result
 `where:`, `scope:`). Query classes answer `where`/`where.not`/`order`/`limit`/
 `offset`/`find`/`first`/`fetch`/`to_sql`/`source_model`.
 
+`Pluckr.batch` is the second entry point: it takes relations the caller already
+built and wraps each one in a derived table, so ActiveRecord's own scoping
+applies and none of the reflection rules below are involved. It reuses the
+Aggregate node (with `relation:` instead of `model:`), the compiler's
+`aggregate_only_sql` and the result builder - no separate execution path.
+
 ## How the SQL is built
 
 - plain fields -> selected columns, never `SELECT users.*`
@@ -50,6 +57,10 @@ Pipeline: `DSL -> schema AST -> reflection -> SQL compiler -> flat row -> result
 - independent aggregates (`from:`) -> `(SELECT COUNT(*) FROM ... WHERE ...)` built
   from an AR relation, so quoting and default scopes come from ActiveRecord
 - STI type conditions and polymorphic `as:` type columns are added automatically
+- a relation-rooted aggregate (`Pluckr.batch`) -> `(SELECT COUNT(*) FROM (<the
+  relation's own SQL>) pluckr_batch_1)`. The caller's projection is kept when
+  `DISTINCT`/`GROUP BY` applies to it and dropped otherwise; `order` is kept only
+  when a `limit`/`offset` depends on it; eager loading and locks are dropped
 
 ## Tests
 
