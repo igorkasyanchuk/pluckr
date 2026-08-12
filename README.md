@@ -298,16 +298,24 @@ identical data, and prints `EXPLAIN ANALYZE` for the generated SQL.
 query plans, how cost scales with page size, what a missing foreign key index
 costs (123x), and what to expect once the database is a network hop away.
 
-## Try it
+## Try it locally
+
+No Rails app needed - the repository ships a sandbox with its own schema, seeds
+and example read models.
 
 ```bash
-bin/setup      # creates a dev database (SQLite file), loads a schema, seeds it
+git clone https://github.com/igorkasyanchuk/pluckr && cd pluckr
+bundle install
+bin/setup      # creates the dev database, loads the schema, seeds it
 bin/console    # IRB with the models, seeds and example queries loaded
 ```
 
 ```
 Pluckr 0.1.0 sandbox - sqlite3 dev/pluckr_dev.sqlite3
 users: 21  subscriptions: 14  plans: 3  photos: 29  videos: 31  comments: 49
+
+Queries:  UserSummary, UserCard, DashboardStats     (see dev/queries.rb)
+Models:   User, Subscription, Plan, Photo, Video, Comment, Account, Order
 
 >> UserSummary.find(2).to_h
 => {id: 2, email: "user1@example.com",
@@ -317,31 +325,79 @@ users: 21  subscriptions: 14  plans: 3  photos: 29  videos: 31  comments: 49
 >> statements { UserSummary.where(active: true).limit(5).fetch }
 1. SELECT "users"."id" AS "id", ...
 => 1
+
+>> DashboardStats.fetch.to_h
+=> {users: 21, active_users: 16, comments: 49, active_accounts: 5,
+    paid_revenue: 1641, last_signup: 2026-08-12 21:14:14 UTC}
 ```
 
-`dev/queries.rb` holds three example read models (`UserSummary`, `UserCard`,
-`DashboardStats`) covering aliases, nesting, `via:`, `scope:` and dashboards -
-edit them and reload the console. Console helpers: `sql(query)`,
-`explain(query, analyze: true)`, `statements { ... }`, `reseed!`, `reset!`,
-`Dev.log!`, `Dev.counts`.
+The seed data is deliberately uneven - some users have no subscription, some
+subscriptions have no plan - so `nil` versus NULL is visible immediately.
 
-PostgreSQL or MySQL instead of SQLite:
+### Console helpers
+
+| | |
+| --- | --- |
+| `sql(query)` | print the generated SQL, split across clauses |
+| `explain(query)` | `EXPLAIN` it (`analyze: true` for `EXPLAIN ANALYZE` on PostgreSQL) |
+| `statements { ... }` | print and count the statements a block executes |
+| `reseed!(users: 500)` | wipe and re-seed |
+| `reset!` | reload the schema, then re-seed |
+| `Dev.log!` | echo every statement to stdout |
+| `Dev.counts` | row counts per table |
+
+### What is in `dev/`
+
+| File | Contents |
+| --- | --- |
+| `dev/schema.rb` | users, subscriptions, plans, photos, videos, comments, accounts, orders - with the indexes a real app would have |
+| `dev/models.rb` | the ActiveRecord models, including a self-referential `manager` / `direct_reports` |
+| `dev/seeds.rb` | deterministic seed data |
+| `dev/queries.rb` | `UserSummary`, `UserCard`, `DashboardStats` - aliases, nesting, `via:`, `where:`, `scope:`, dashboards |
+| `dev/console_helpers.rb` | the helpers above |
+| `dev/boot.rb` | connection, `Dev.reset!`, `Dev.seed!`, `Dev.log!` |
+
+Edit `dev/queries.rb` and pick the changes up without leaving the session:
+
+```ruby
+>> load "dev/queries.rb"
+>> sql UserSummary.limit(1)
+```
+
+### Another database
+
+SQLite is the default and lives in `dev/pluckr_dev.sqlite3`, so the data
+survives between sessions.
 
 ```bash
 DB=postgres bin/setup && DB=postgres bin/console
-SEED_USERS=5000 DB=postgres bin/setup
+DB=mysql    bin/setup && DB=mysql    bin/console
+SEED_USERS=5000 DB=postgres bin/setup       # a dataset worth EXPLAIN-ing
 ```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DB` | `sqlite` | `sqlite`, `postgres` or `mysql` |
+| `SEED_USERS` | `20` | how many users to seed |
+| `PLUCKR_DEV_DATABASE` | `pluckr_dev` | database name (file name on SQLite) |
+| `PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` | `postgres` user | PostgreSQL connection |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` | `root@127.0.0.1` | MySQL connection |
 
 ## Development
 
 ```bash
-bundle install
 bundle exec rspec              # SQLite (default)
-DB=postgres bundle exec rspec
+DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec
 ```
 
-CI runs the suite against SQLite, PostgreSQL and MySQL.
+The spec suite manages its own `pluckr_test` database and is independent of the
+`dev/` sandbox. CI runs it on Ruby 3.2 and 3.4 against SQLite, PostgreSQL and
+MySQL; changes should pass on SQLite and PostgreSQL locally before pushing.
+
+Benchmarks live in `benchmarks/read_models.rb` - see
+[Benchmarks](#benchmarks) above. [AGENTS.md](AGENTS.md) documents the internals,
+the invariants and why the generated SQL looks the way it does.
 
 ## License
 
