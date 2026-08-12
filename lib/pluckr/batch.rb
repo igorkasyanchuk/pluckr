@@ -8,6 +8,7 @@ module Pluckr
   #     b.count  user.videos,                        as: :video_count
   #     b.sum    user.videos.where(size: 100..), :size, as: :big_video_bytes
   #     b.exists user.photos,                        as: :has_photos
+  #     b.avg    user.videos, :size,                 as: :average_size
   #     b.count  Account.active,                     as: :active_accounts
   #   end
   #
@@ -48,6 +49,11 @@ module Pluckr
     def sum(source, column, as:)
       add(:sum, source, column, as)
     end
+
+    def avg(source, column, as:)
+      add(:avg, source, column, as)
+    end
+    alias average avg
 
     def min(source, column, as:)
       add(:min, source, column, as)

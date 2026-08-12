@@ -82,6 +82,21 @@ RSpec.describe "aggregate-only (dashboard) queries" do
       expect(stats.smallest_order).to eq(7)
       expect(stats.largest_order).to eq(100)
     end
+
+    it "supports independent averages" do
+      define_query("AverageStats") do
+        schema do
+          avg :average_order, from: Order, column: :amount
+          average :average_paid, from: Order, column: :amount, where: { status: "paid" }
+        end
+      end
+
+      stats = AverageStats.fetch
+
+      expect(stats.average_order).to eq(Order.average(:amount))
+      expect(stats.average_paid).to eq(60) # (100 + 20) / 2
+      expect(stats.average_paid).to be_a(BigDecimal)
+    end
   end
 
   describe "mixed with a source query" do

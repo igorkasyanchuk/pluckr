@@ -9,6 +9,9 @@ module Pluckr
     class Builder
       BOOLEAN = ActiveModel::Type::Boolean.new
       INTEGER = ActiveModel::Type::Integer.new
+      # AVG of an integer column is not an integer; ActiveRecord answers a
+      # BigDecimal here and so does Pluckr.
+      DECIMAL = ActiveRecord::Type::Decimal.new
 
       # Casts one column of a row. `default` covers SQL returning NULL where the
       # equivalent ActiveRecord call would not: SUM over no rows is NULL in SQL
@@ -58,6 +61,7 @@ module Pluckr
         case node.operation
         when :count then Caster.new(INTEGER)
         when :exists then Caster.new(BOOLEAN)
+        when :avg then Caster.new(DECIMAL) # nil for no rows, like `relation.average`
         else
           type = node.target_model.type_for_attribute(node.column)
           # `sum` answers 0 for no rows, like ActiveRecord; `min`/`max` stay nil,

@@ -147,6 +147,7 @@ all in one statement:
 stats = Pluckr.batch do |b|
   b.count  user.videos,                          as: :video_count
   b.sum    user.videos.where(size: 100..), :size, as: :big_video_bytes
+  b.avg    user.videos, :size,                    as: :average_size
   b.exists user.photos,                          as: :has_photos
   b.count  Account.active,                       as: :active_accounts
 end
@@ -169,8 +170,8 @@ association scopes, `has_many :through`, polymorphic and STI conditions,
 refuses to compile all work here, because Pluckr is not deriving the join - it
 is reading the relation's own `to_sql`.
 
-`count`, `sum`, `min`, `max` and `exists` are available; `as:` is always
-required. A model class works where a relation does (`b.count User, as: :users`).
+`count`, `sum`, `avg` (alias `average`), `min`, `max` and `exists` are
+available; `as:` is always required. A model class works where a relation does (`b.count User, as: :users`).
 `Pluckr::Batch.build { ... }` returns the batch unexecuted, with `#to_sql` and
 `#fetch`.
 
@@ -191,9 +192,10 @@ index page, define a query.
 | `count :videos` | `videos_count` | scalar subquery |
 | `count :videos, as: :n_videos` | `n_videos` | scalar subquery |
 | `count :users, from: User` | `users` | scalar subquery |
-| `sum/min/max ..., column: :amount` | `<name>_sum` etc. | scalar subquery |
+| `sum/avg/min/max ..., column: :amount` | `<name>_sum`, `<name>_avg`, ... | scalar subquery |
 
-`exists`, `count`, `sum`, `min` and `max` all take `where:` and `scope:`:
+`exists`, `count`, `sum`, `avg`, `min` and `max` all take `where:` and `scope:`
+(`average` is an alias of `avg`, and both name their output `<name>_avg`):
 
 ```ruby
 count :active_accounts, from: Account, where: { active: true }
@@ -310,8 +312,9 @@ user.created_at    # NoMethodError - not selected
 
 Values are cast with the model's own column types, so `active` is `true` and
 not `1` on every adapter, and aggregates answer what ActiveRecord would:
-`count` and `sum` are `0` when nothing matched, `min`/`max` are `nil`, because
-no row means no minimum.
+`count` and `sum` are `0` when nothing matched, `min`/`max`/`avg` are `nil`,
+because no row means no minimum. `avg` is a `BigDecimal`, even over an integer
+column.
 
 They serialise as their data, so `render json:` does the obvious thing:
 

@@ -366,7 +366,7 @@ RSpec.describe "source-rooted queries" do
       expect(sql).not_to include("GROUP BY")
     end
 
-    it "supports correlated sum/min/max" do
+    it "supports correlated sum/avg/min/max" do
       Video.create!(user: user, size: 10)
       Video.create!(user: user, size: 30)
 
@@ -376,6 +376,7 @@ RSpec.describe "source-rooted queries" do
         schema do
           field :id
           sum :videos, column: :size
+          avg :videos, column: :size
           min :videos, column: :size, as: :smallest_video
           max :videos, column: :size, as: :largest_video
         end
@@ -384,8 +385,39 @@ RSpec.describe "source-rooted queries" do
       result = UserVideoStats.find(user.id)
 
       expect(result.videos_sum).to eq(40)
+      expect(result.videos_avg).to eq(20)
       expect(result.smallest_video).to eq(10)
       expect(result.largest_video).to eq(30)
+    end
+
+    it "answers the same average as ActiveRecord, as a BigDecimal" do
+      [100, 150, 175].each { |size| Video.create!(user: user, size: size) }
+
+      define_query("UserVideoStats") do
+        source User
+
+        schema do
+          average :videos, column: :size, as: :mean_size
+          avg :videos, column: :size
+        end
+      end
+
+      result = UserVideoStats.find(user.id)
+
+      expect(result.mean_size).to be_a(BigDecimal)
+      expect(result.mean_size).to eq(user.videos.average(:size))
+      expect(result.videos_avg).to eq(result.mean_size) # `average` is an alias of `avg`
+    end
+
+    it "returns nil for an average over no rows, like ActiveRecord" do
+      define_query("UserVideoStats") do
+        source User
+
+        schema { avg :videos, column: :size }
+      end
+
+      expect(UserVideoStats.find(user.id).videos_avg).to be_nil
+      expect(user.videos.average(:size)).to be_nil
     end
   end
 

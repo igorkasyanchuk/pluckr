@@ -172,6 +172,19 @@ RSpec.describe Pluckr::Batch do
   end
 
   describe "operations" do
+    it "averages, answering what ActiveRecord answers" do
+      result = Pluckr.batch do |b|
+        b.avg user.videos, :size, as: :mean
+        b.average user.videos, :size, as: :mean_alias
+        b.avg Video.none, :size, as: :empty
+      end
+
+      expect(result.mean).to be_a(BigDecimal)
+      expect(result.mean).to eq(user.videos.average(:size))
+      expect(result.mean_alias).to eq(result.mean)
+      expect(result.empty).to be_nil
+    end
+
     it "supports count, sum, min, max and exists" do
       result = Pluckr.batch do |b|
         b.count user.videos, as: :count

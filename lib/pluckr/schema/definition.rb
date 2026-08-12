@@ -77,6 +77,11 @@ module Pluckr
         aggregate(:sum, name, from: from, via: via, as: as, where: where, column: column, scope: scope)
       end
 
+      def avg(name, from: nil, via: nil, as: nil, where: nil, column: nil, scope: nil)
+        aggregate(:avg, name, from: from, via: via, as: as, where: where, column: column, scope: scope)
+      end
+      alias average avg
+
       def min(name, from: nil, via: nil, as: nil, where: nil, column: nil, scope: nil)
         aggregate(:min, name, from: from, via: via, as: as, where: where, column: column, scope: scope)
       end

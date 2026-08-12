@@ -23,6 +23,9 @@
   `default_scope`d associations.
 - Result objects serialise as their data: `as_json`, `to_json` and `to_hash`, so
   `render json: result` no longer emits `{"attributes": {...}}`.
+- `avg` (alias `average`) alongside `count`/`sum`/`min`/`max`, correlated,
+  independent and in `Pluckr.batch`. Returns a BigDecimal, or nil over no rows,
+  matching `relation.average`.
 - `sum` returns 0 rather than nil when nothing matched, matching
   `relation.sum(:column)`; `min`/`max` still return nil.
 - `where:` accepts a callable returning a Hash, evaluated on every compilation,

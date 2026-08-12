@@ -12,7 +12,7 @@ module Pluckr
     class Aggregate < Node
       include Conditions
 
-      OPERATIONS = %i[count sum min max exists].freeze
+      OPERATIONS = %i[count sum avg min max exists].freeze
 
       attr_reader :operation, :association, :model, :relation, :column, :where, :scope
 

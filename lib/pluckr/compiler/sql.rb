@@ -248,6 +248,7 @@ module Pluckr
         when :count
           node.column ? Arel::Nodes::Count.new([table[node.column]]) : Arel::Nodes::Count.new([Arel.star])
         when :sum then Arel::Nodes::Sum.new([table[node.column]])
+        when :avg then Arel::Nodes::Avg.new([table[node.column]])
         when :min then Arel::Nodes::Min.new([table[node.column]])
         when :max then Arel::Nodes::Max.new([table[node.column]])
         else

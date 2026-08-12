@@ -31,8 +31,8 @@ Pipeline: `DSL -> schema AST -> reflection -> SQL compiler -> flat row -> result
 ## DSL surface
 
 `source`, `schema`, and inside a schema: `field` (`as:`), `one` (`via:`, nests),
-`exists` and `count`/`sum`/`min`/`max` (`as:`, `via:`, `from:`, `column:`,
-`where:`, `scope:`). Query classes answer `where`/`where.not`/`order`/`limit`/
+`exists` and `count`/`sum`/`avg`/`min`/`max` (`as:`, `via:`, `from:`, `column:`,
+`where:`, `scope:`; `average` aliases `avg`). Query classes answer `where`/`where.not`/`order`/`limit`/
 `offset`/`find`/`first`/`fetch`/`to_sql`/`source_model`.
 
 `Pluckr.batch` is the second entry point: it takes relations the caller already
@@ -54,7 +54,7 @@ Aggregate node (with `relation:` instead of `model:`), the compiler's
   optimisation fence; without it PostgreSQL rewrites the correlated EXISTS into a
   hashed subplan that scans the whole child table (50x slower on a paged query).
   Do not "clean it up".
-- `count`/`sum`/`min`/`max` -> scalar subquery, never JOIN + GROUP BY
+- `count`/`sum`/`avg`/`min`/`max` -> scalar subquery, never JOIN + GROUP BY
 - `where:` is a Hash (validated at definition time) or a callable returning one
   (invoked and validated on every compilation, so runtime values stay runtime
   values) - see `schema/conditions.rb`
@@ -77,7 +77,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-191 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+195 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
@@ -132,7 +132,8 @@ and update that file whenever the compiler's output changes.
 - Adapter-neutral: build SQL with Arel, quote through the connection, and cast
   result values with the model's column types (only PostgreSQL returns typed
   values for raw SQL). Where SQL and ActiveRecord disagree, follow ActiveRecord:
-  `sum` over no rows is 0, not NULL (`Result::Builder::Caster#default`).
+  `sum` over no rows is 0, not NULL (`Result::Builder::Caster#default`), and an
+  `avg` is a BigDecimal rather than the column's own type.
 - Every behavior change needs specs, including the SQL shape and, where it
   matters, a statement count via `SqlCounter.capture`.
 - Prefer failing loudly over compiling questionable SQL.
