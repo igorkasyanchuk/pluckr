@@ -8,14 +8,14 @@ module Pluckr
     # when the query is loaded rather than when it is executed.
     class Definition
       # @param model [Class<ActiveRecord::Base>, nil] nil for aggregate-only queries
-      def self.build(model, &block)
-        raise ConfigurationError, "`schema` requires a block" unless block
+      def self.build(model, label: "schema", &block)
+        raise ConfigurationError, "`#{label}` requires a block" unless block
 
         definition = new(model)
         definition.instance_eval(&block)
         scope = definition.to_scope
 
-        raise ConfigurationError, "`schema` block is empty - declare at least one node" if scope.nodes.empty?
+        raise ConfigurationError, "`#{label}` block is empty - declare at least one node" if scope.nodes.empty?
 
         scope
       end
@@ -51,7 +51,7 @@ module Pluckr
         add One.new(
           output: name,
           association: association,
-          scope: Definition.build(association.klass, &block)
+          scope: Definition.build(association.klass, label: "one :#{name}", &block)
         )
       end
 

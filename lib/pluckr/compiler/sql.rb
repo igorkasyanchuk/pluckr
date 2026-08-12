@@ -143,27 +143,68 @@ module Pluckr
       # Conditions are delegated to ActiveRecord, so values are quoted by the
       # adapter - never string-interpolated here.
       def scalar_subquery(node)
-        relation = narrow(node, node.model.all)
+        relation = aggregate_relation(node, node.model.all)
         relation = relation.select(aggregate_function(node, node.model.arel_table))
 
         Arel.sql("(#{relation.to_sql})")
       end
 
       # `where:`/`scope:` conditions are written against the model's real table,
-      # so the correlated subquery cannot use a table alias. That is only a
-      # problem when the association points back at the root table.
+      # so this subquery cannot alias it. That is only a problem when the name it
+      # needs is already taken by the table it correlates to - directly, or
+      # through a table the scope joins in.
       def correlated_relation(node, owner_table, projection)
         klass = node.association.klass
+        owner_name = table_name_of(owner_table)
 
-        if klass.table_name == source_model.table_name
+        if klass.table_name == owner_name
           raise ConfigurationError,
-                "`#{node.output}`: `where:`/`scope:` are not supported on a self-referential " \
-                "association (#{klass.name} and the source share table `#{klass.table_name}`)"
+                "`#{node.output}`: `where:`/`scope:` cannot be used here - #{klass.name} and the " \
+                "correlated row share table `#{owner_name}`, so the subquery cannot name both"
         end
 
-        relation = narrow(node, klass.all)
+        relation = aggregate_relation(node, klass.all)
+        reject_shadowed_correlation!(node, relation, owner_name)
+
         relation.where(node.association.join_condition(klass.arel_table, owner_table))
                 .select(projection)
+      end
+
+      # A scope that joins the correlated table would bind the correlation to its
+      # own copy of it, silently returning the wrong numbers.
+      def reject_shadowed_correlation!(node, relation, owner_name)
+        return unless relation.arel.join_sources.any? { |join| references?(join.left, owner_name) }
+
+        raise ConfigurationError,
+              "`#{node.output}`: `scope:` joins `#{owner_name}`, which is also the correlated " \
+              "table - the correlation would bind to the joined copy instead of the outer row"
+      end
+
+      def references?(source, name)
+        source.respond_to?(:name) ? table_name_of(source) == name : source.to_s.match?(/\b#{Regexp.escape(name)}\b/)
+      end
+
+      def table_name_of(table)
+        table.respond_to?(:name) ? table.name.to_s : table.to_s
+      end
+
+      # Whatever the scope selects, orders or limits is meaningless (or invalid)
+      # inside a scalar aggregate subquery.
+      def aggregate_relation(node, relation)
+        relation = narrow(node, relation)
+        reject_row_shaping!(node, relation)
+
+        relation.unscope(:select, :order)
+      end
+
+      def reject_row_shaping!(node, relation)
+        shaping = { limit: relation.limit_value, offset: relation.offset_value,
+                    group: relation.group_values.presence }.compact.keys
+        return if shaping.empty?
+
+        raise ConfigurationError,
+              "`#{node.output}`: `scope:` may not use #{shaping.join("/")} - the subquery must " \
+              "return exactly one value"
       end
 
       def narrow(node, relation)
@@ -178,9 +219,13 @@ module Pluckr
         scoped = zero_arity ? node.scope.call : node.scope.call(relation)
 
         unless scoped.is_a?(ActiveRecord::Relation) && scoped.klass == relation.klass
+          # Never `inspect` a relation here - that would run a query while raising
+          # a configuration error.
+          got = scoped.is_a?(ActiveRecord::Relation) ? "a relation for #{scoped.klass.name}" : scoped.inspect
+
           raise ConfigurationError,
                 "`#{node.output}`: `scope:` must return an ActiveRecord::Relation for " \
-                "#{relation.klass.name}, got #{scoped.inspect}"
+                "#{relation.klass.name}, got #{got}"
         end
 
         scoped
@@ -223,7 +268,8 @@ module Pluckr
         if name.bytesize > limit
           raise ConfigurationError,
                 "output alias `#{name}` is #{name.bytesize} bytes, over this database's " \
-                "#{limit}-byte identifier limit - shorten it with `as:`"
+                "#{limit}-byte identifier limit - shorten it with `as:`, or rename the " \
+                "enclosing `one` nodes if it is a nested path"
         end
 
         connection.quote_column_name(name)

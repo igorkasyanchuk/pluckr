@@ -206,7 +206,7 @@ RSpec.describe "scope: and where: on aggregates" do
       expect { Bad.to_sql }.to raise_error(Pluckr::ConfigurationError, /must return an ActiveRecord::Relation/)
     end
 
-    it "rejects scope: on a self-referential association" do
+    it "rejects scope: when the association shares the correlated table" do
       define_query("Bad") do
         source User
 
@@ -215,7 +215,84 @@ RSpec.describe "scope: and where: on aggregates" do
         end
       end
 
-      expect { Bad.to_sql }.to raise_error(Pluckr::ConfigurationError, /self-referential/)
+      expect { Bad.to_sql }
+        .to raise_error(Pluckr::ConfigurationError, /share table `users`/)
+    end
+
+    it "allows scope: on the same model once the owner is an aliased join" do
+      boss = User.create!(email: "boss@example.com")
+      user.update!(manager: boss)
+      User.create!(email: "quiet@example.com", manager: boss, active: false)
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          one :manager do
+            field :email
+            count :direct_reports, as: :active_reports, scope: ->(rel) { rel.where(active: true) }
+          end
+        end
+      end
+
+      expect(UserSummary.find(user.id).manager.active_reports).to eq(1)
+    end
+
+    it "rejects a scope that joins the correlated table" do
+      define_query("Bad") do
+        source User
+
+        schema do
+          count :photos, scope: ->(rel) { rel.joins(:user).where(users: { active: true }) }
+        end
+      end
+
+      expect { Bad.to_sql }
+        .to raise_error(Pluckr::ConfigurationError, /joins `users`.*correlated table/m)
+    end
+
+    it "rejects scopes that reshape the subquery into more or fewer than one value" do
+      define_query("Limited") do
+        source User
+
+        schema { count :photos, scope: ->(rel) { rel.limit(2) } }
+      end
+
+      define_query("Grouped") do
+        schema { count :photos, from: Photo, scope: ->(rel) { rel.group(:url) } }
+      end
+
+      expect { Limited.to_sql }.to raise_error(Pluckr::ConfigurationError, /may not use limit/)
+      expect { Grouped.to_sql }.to raise_error(Pluckr::ConfigurationError, /may not use group/)
+    end
+
+    it "ignores select/order noise from a scope" do
+      Photo.create!(user: user, url: "https://example.com/a.jpg")
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          count :photos, scope: ->(rel) { rel.select(:id).order(:url) }
+        end
+      end
+
+      expect(UserSummary.find(user.id).photos_count).to eq(1)
+    end
+
+    it "does not run a query while reporting a bad scope" do
+      define_query("Bad") do
+        schema do
+          count :accounts, from: Account, scope: ->(_) { Order.all }
+        end
+      end
+
+      statements = nil
+      expect do
+        statements = SqlCounter.capture { Bad.to_sql }
+      end.to raise_error(Pluckr::ConfigurationError, /got a relation for Order/)
+
+      expect(statements).to be_nil
     end
   end
 end

@@ -141,6 +141,10 @@ exists :recent_photos, via: :photos, scope: -> { Photo.where(created_at: 1.week.
 no arguments) and must return a relation for the same model. It runs on every
 compilation, so runtime values stay fresh. `where:` takes a plain hash.
 
+A scope narrows rows only. `limit`/`offset`/`group` inside one raise, and a
+scope that joins the very table being correlated to raises as well, because the
+correlation would silently bind to the joined copy.
+
 `one` nests to any depth of singular associations:
 
 ```ruby
