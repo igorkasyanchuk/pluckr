@@ -126,9 +126,11 @@ module TestDatabase
       add_index :videos, %i[user_id size] # filtered counts
 
       create_table :comments, force: true do |t|
-        t.references :user
+        t.references :user, index: false
         t.string :body
+        t.timestamps
       end
+      add_index :comments, %i[user_id created_at] # "the user's latest comment"
 
       create_table :accounts, force: true do |t|
         t.boolean :active, default: false, null: false

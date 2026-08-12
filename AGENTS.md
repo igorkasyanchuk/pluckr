@@ -31,6 +31,7 @@ Pipeline: `DSL -> schema AST -> reflection -> SQL compiler -> flat row -> result
 ## DSL surface
 
 `source`, `schema`, and inside a schema: `field` (`as:`), `one` (`via:`, nests),
+`first`/`last` (`via:`, `order:`, fields only),
 `exists` and `count`/`sum`/`avg`/`min`/`max` (`as:`, `via:`, `from:`, `column:`,
 `where:`, `scope:`; `average` aliases `avg`). Query classes answer `where`/`where.not`/`order`/`limit`/
 `offset`/`find`/`first`/`fetch`/`to_sql`/`source_model`.
@@ -54,6 +55,10 @@ Aggregate node (with `relation:` instead of `model:`), the compiler's
   optimisation fence; without it PostgreSQL rewrites the correlated EXISTS into a
   hashed subplan that scans the whole child table (50x slower on a paged query).
   Do not "clean it up".
+- `first`/`last` -> one correlated `LIMIT 1` subquery per selected column, never
+  a join or a window function (SQLite has no LATERAL). The order always ends with
+  the primary key so every column comes from the same row, and `last` inverts the
+  requested order, matching `relation.order(...).last`
 - `count`/`sum`/`avg`/`min`/`max` -> scalar subquery, never JOIN + GROUP BY
 - `where:` is a Hash (validated at definition time) or a callable returning one
   (invoked and validated on every compilation, so runtime values stay runtime
@@ -77,7 +82,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-195 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+220 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
@@ -129,6 +134,10 @@ and update that file whenever the compiler's output changes.
 - One SQL statement per execution. `has_many` is never joined.
 - The compiler holds no mutable state between calls - it compiles fresh on every
   `apply`, so `scope:` callables are re-evaluated and the object stays thread-safe.
+- Compose Arel nodes into the outer relation; do not call `to_sql` on a bare Arel
+  manager. An STI `type_condition` carries a bind parameter that only the outer
+  relation can render - stringifying early emits `= ?` and silently matches
+  nothing.
 - Adapter-neutral: build SQL with Arel, quote through the connection, and cast
   result values with the model's column types (only PostgreSQL returns typed
   values for raw SQL). Where SQL and ActiveRecord disagree, follow ActiveRecord:

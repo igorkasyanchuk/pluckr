@@ -87,6 +87,8 @@ module Pluckr
       end
 
       def walk_one(build, node, path, owner_table)
+        return walk_picked(build, node, path, owner_table) if node.picked?
+
         child_path = path + [node.output.to_s]
         association = node.association
         child_table = association.klass.arel_table.alias(Aliases.table(child_path))
@@ -101,6 +103,40 @@ module Pluckr
         project build, child_table[association.primary_key], Aliases.presence(child_path)
 
         walk(build, node.scope, child_path, child_table)
+      end
+
+      # `first`/`last`: one row of a collection, without joining it. Each selected
+      # column is its own correlated subquery, ordered the same way and ending in
+      # the primary key, so every column comes from the same row.
+      #
+      #   (SELECT "c"."body" FROM "comments" "c" WHERE "c"."user_id" = "users"."id"
+      #     ORDER BY "c"."created_at" DESC, "c"."id" DESC LIMIT 1) AS "last_comment.body"
+      def walk_picked(build, node, path, owner_table)
+        child_path = path + [node.output.to_s]
+
+        # Presence marker: the row exists even if every selected column is NULL.
+        project build, picked_column(build, node, owner_table, node.association.primary_key),
+                Aliases.presence(child_path)
+
+        node.scope.nodes.each do |field|
+          project build, picked_column(build, node, owner_table, field.column),
+                  Aliases.output(child_path, field.output)
+        end
+      end
+
+      def picked_column(build, node, owner_table, column)
+        association = node.association
+        table = subquery_table(build, association)
+        subquery = Arel::SelectManager.new(table)
+                   .project(table[column])
+                   .where(association.join_condition(table, owner_table))
+        subquery = restrict_to_sti(subquery, association.klass, table)
+
+        node.order.each { |name, direction| subquery.order(table[name].public_send(direction)) }
+
+        # Returned as Arel, not SQL: an STI type condition carries a bind
+        # parameter, and only the outer relation can render it.
+        Arel::Nodes::Grouping.new(subquery.take(1).ast)
       end
 
       def project(build, expression, output_alias)

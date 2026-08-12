@@ -187,6 +187,8 @@ index page, define a query.
 | `field :email, as: :contact` | `contact` | selected column |
 | `one :subscription do ... end` | `subscription` (or `nil`) | `LEFT OUTER JOIN` |
 | `one :plan, via: :subscription do ... end` | `plan` | `LEFT OUTER JOIN` |
+| `first :comment, via: :comments do ... end` | `comment` (or `nil`) | correlated subquery per column, `LIMIT 1` |
+| `last :comment, via: :comments, order: :created_at do ... end` | `comment` | correlated subquery per column, `LIMIT 1` |
 | `exists :photos` | `photos_exists` | correlated `EXISTS`, index probe per row |
 | `exists :photos, as: :has_photos` | `has_photos` | correlated `EXISTS` |
 | `count :videos` | `videos_count` | scalar subquery |
@@ -269,6 +271,48 @@ needed. The `LIMIT 1 OFFSET 0` on `EXISTS` is an optimisation fence - without it
 PostgreSQL rewrites the subquery into a full scan of the child table, which
 costs 50x on a paged query. [BENCHMARKS.md](BENCHMARKS.md#why-exists-carries-limit-1-offset-0)
 has the measurements.
+
+### One row out of many
+
+`one` follows a singular association. To take a single row out of a collection -
+the latest comment, the first order - use `first`/`last`:
+
+```ruby
+class UserSummary < Pluckr::Query
+  source User
+
+  schema do
+    field :email
+
+    last :comment, via: :comments do          # newest by primary key
+      field :body
+      field :created_at
+    end
+
+    last :signup_order, via: :orders, order: :created_at do
+      field :amount
+    end
+  end
+end
+
+user.comment.body        # => "the latest one"   (nil if there are none)
+user.signup_order.amount
+```
+
+Ordering follows ActiveRecord: `last` takes the final row of the given order, so
+`last ..., order: { created_at: :asc }` is what `comments.order(created_at:
+:asc).last` returns. Without `order:` it is the primary key. The primary key is
+always appended as a tiebreaker, so every selected column comes from the same
+row even when the ordering has duplicates.
+
+Each selected column compiles to its own correlated subquery with `LIMIT 1` -
+no join, so root rows are never multiplied, and no window functions, so it works
+the same on all three adapters. The cost is one indexed subquery per column;
+keep these blocks small, and index the foreign key with the ordering column
+(`add_index :comments, [:user_id, :created_at]`).
+
+In v0.1 a `first`/`last` block may only contain `field`s - anything needing a
+join of its own is rejected with a descriptive error.
 
 ### `one` requires a genuinely singular association
 

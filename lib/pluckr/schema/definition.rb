@@ -55,6 +55,17 @@ module Pluckr
         )
       end
 
+      # `first :comment, via: :comments do ... end` - the earliest row of a
+      # collection, by primary key unless `order:` says otherwise.
+      def first(name, via: nil, order: nil, &block)
+        pick(:first, name, via: via, order: order, &block)
+      end
+
+      # `last :comment, via: :comments, order: :created_at do ... end`
+      def last(name, via: nil, order: nil, &block)
+        pick(:last, name, via: via, order: order, &block)
+      end
+
       def exists(name, via: nil, as: nil, where: nil, scope: nil)
         require_source!("exists :#{name}")
         association = Reflection::Association.for(@model, via || name)
@@ -93,6 +104,74 @@ module Pluckr
       # ------------------------------------------------------------ internals --
 
       private
+
+      def pick(direction, name, via:, order:, &block)
+        require_source!("#{direction} :#{name}")
+        raise ConfigurationError, "`#{direction} :#{name}` requires a block" unless block
+
+        association = Reflection::Association.for(@model, via || name)
+        scope = Definition.build(association.klass, label: "#{direction} :#{name}", &block)
+        validate_picked_scope!(direction, name, scope)
+
+        add One.new(
+          output: name,
+          association: association,
+          scope: scope,
+          pick: direction,
+          order: pick_order(direction, name, order, association.klass)
+        )
+      end
+
+      # Every column of the picked row comes from its own subquery, so nesting
+      # anything that needs a joined table cannot work here.
+      def validate_picked_scope!(direction, name, scope)
+        offender = scope.nodes.reject { |node| node.is_a?(Field) }.first
+        return unless offender
+
+        raise ConfigurationError,
+              "`#{direction} :#{name}` can only contain `field` in v0.1, " \
+              "got `#{offender.class.name.split("::").last.downcase} :#{offender.output}`"
+      end
+
+      # Normalises `order:` into [[column, direction], ...].
+      #
+      # `last` reverses it, so `last ..., order: { created_at: :asc }` is the
+      # final row of that ordering - what `relation.order(...).last` returns. The
+      # primary key always ends the list, so ties cannot make two columns come
+      # from two different rows.
+      def pick_order(direction, name, order, model)
+        entries = Array(order_entries(direction, name, order))
+        entries.each { |column, _| validate_column!(model, column) }
+        entries = entries.map { |column, dir| [column, invert(dir)] } if direction == :last
+
+        primary_key = model.primary_key&.to_sym
+        tiebreaker = direction == :last ? :desc : :asc
+        entries << [primary_key, tiebreaker] if primary_key && entries.none? { |column, _| column == primary_key }
+        entries.freeze
+      end
+
+      def invert(direction)
+        direction == :asc ? :desc : :asc
+      end
+
+      def order_entries(direction, name, order)
+        case order
+        when nil then []
+        when Symbol, String then [[order.to_sym, :asc]]
+        when Hash then order.map { |column, dir| [column.to_sym, order_direction(direction, name, dir)] }
+        when Array then order.flat_map { |entry| order_entries(direction, name, entry) }
+        else
+          raise ConfigurationError,
+                "`#{direction} :#{name}, order:` expects a column, a Hash or an Array, got #{order.inspect}"
+        end
+      end
+
+      def order_direction(direction, name, value)
+        return value.to_sym if %w[asc desc].include?(value.to_s.downcase)
+
+        raise ConfigurationError,
+              "`#{direction} :#{name}, order:` expects :asc or :desc, got #{value.inspect}"
+      end
 
       def aggregate(operation, name, from:, via:, as:, where:, column:, scope:)
         validate_scope!("#{operation} :#{name}", scope)

@@ -157,6 +157,40 @@ RSpec.describe "scope: and where: on aggregates" do
       expect(counts.map(&:id)).to eq([user.id, other.id])
     end
 
+    it "narrows an average" do
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          avg :videos, column: :size
+          avg :videos, column: :size, as: :big_average, scope: ->(rel) { rel.where(size: 100..) }
+          average :videos, column: :size, as: :tiny_average, where: { size: 10 }
+        end
+      end
+
+      result = UserSummary.find(user.id)
+
+      expect(result.videos_avg).to eq(user.videos.average(:size))
+      expect(result.big_average).to eq(500)
+      expect(result.tiny_average).to eq(10)
+    end
+
+    it "averages with a dynamic where" do
+      floor = 400
+
+      define_query("UserSummary") do
+        source User
+
+        schema { avg :videos, column: :size, where: -> { { size: floor.. } } }
+      end
+
+      expect(UserSummary.find(user.id).videos_avg).to eq(500)
+
+      floor = 1
+
+      expect(UserSummary.find(user.id).videos_avg).to eq(user.videos.average(:size))
+    end
+
     it "applies scope on top of the STI type condition" do
       Report.create!(user: user, title: "Q1")
       Report.create!(user: user, title: "Q2")
