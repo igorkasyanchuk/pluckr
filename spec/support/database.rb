@@ -127,6 +127,12 @@ module TestDatabase
         t.boolean :active, default: false, null: false
       end
 
+      # Polymorphic association target.
+      create_table :likes, force: true do |t|
+        t.bigint :likeable_id
+        t.string :likeable_type
+      end
+
       create_table :orders, force: true do |t|
         t.string :status
         t.integer :amount

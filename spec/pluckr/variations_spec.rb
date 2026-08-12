@@ -407,6 +407,105 @@ RSpec.describe "query variations" do
     end
   end
 
+  describe "polymorphic `as:` associations" do
+    let!(:photo) { Photo.create!(user: user, url: "https://example.com/a.jpg") }
+
+    before do
+      Like.create!(likeable: photo)
+      Like.create!(likeable: photo)
+      Like.create!(likeable: user)
+    end
+
+    it "matches on the type column, not just the id" do
+      define_query("PhotoSummary") do
+        source Photo
+
+        schema do
+          field :id
+          count :likes
+          exists :likes
+        end
+      end
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          count :likes
+        end
+      end
+
+      expect(PhotoSummary.find(photo.id).likes_count).to eq(2)
+      expect(PhotoSummary.find(photo.id).likes_exists).to be(true)
+      expect(UserSummary.find(user.id).likes_count).to eq(1)
+      expect(PhotoSummary.to_sql).to include(qv("Photo"))
+    end
+  end
+
+  describe "where.not" do
+    let!(:other) { User.create!(email: "other@example.com", active: false) }
+
+    it "negates root conditions" do
+      define_query("UserSummary") do
+        source User
+
+        schema { field :email }
+      end
+
+      expect(UserSummary.where.not(active: true).fetch.map(&:email)).to eq(["other@example.com"])
+      expect(UserSummary.where.not(active: true).to_sql).to match(/NOT|!=/)
+    end
+  end
+
+  describe "runtime scopes" do
+    it "re-evaluates scope callables on every compilation" do
+      threshold = 100
+
+      define_query("UserVideos") do
+        source User
+
+        schema do
+          count :videos, as: :big_videos, scope: ->(rel) { rel.where(size: threshold..) }
+        end
+      end
+
+      Video.create!(user: user, size: 50)
+      Video.create!(user: user, size: 500)
+
+      expect(UserVideos.find(user.id).big_videos).to eq(1)
+
+      threshold = 10
+
+      expect(UserVideos.find(user.id).big_videos).to eq(2)
+    end
+  end
+
+  describe "identifier limits" do
+    it "raises instead of letting the database truncate a long alias" do
+      long_name = ("a".."z").to_a.join * 4
+
+      define_query("Bad") do
+        source User
+
+        schema { field :email, as: long_name.to_sym }
+      end
+
+      expect { Bad.to_sql }.to raise_error(Pluckr::ConfigurationError, /identifier limit/)
+    end
+  end
+
+  describe "empty schema" do
+    it "is rejected" do
+      expect do
+        define_query("Bad") do
+          source User
+
+          schema { nil }
+        end
+      end.to raise_error(Pluckr::ConfigurationError, /empty/)
+    end
+  end
+
   describe "compilation reuse" do
     before do
       define_query("UserSummary") do

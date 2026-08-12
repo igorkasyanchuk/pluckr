@@ -66,9 +66,18 @@ module Pluckr
         reflection.join_foreign_key.to_s
       end
 
+      # Column holding the owner's type for `has_many/has_one ..., as: :thing`.
+      def type_column
+        reflection.type
+      end
+
       # ON clause for `owner_table` LEFT JOIN `association_table`.
       def join_condition(association_table, owner_table)
-        association_table[association_key].eq(owner_table[owner_key])
+        condition = association_table[association_key].eq(owner_table[owner_key])
+        return condition unless type_column
+
+        # `has_many :likes, as: :likeable` also matches on likes.likeable_type.
+        condition.and(association_table[type_column].eq(owner.polymorphic_name))
       end
 
       private

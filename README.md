@@ -78,7 +78,7 @@ UserSummary.where(active: true)
 UserSummary.where(active: true).to_sql
 ```
 
-`where`/`order`/`limit`/`offset` are ActiveRecord's own — Pluckr passes them
+`where`/`where.not`/`order`/`limit`/`offset` are ActiveRecord's own — Pluckr passes them
 through to the root relation and adds its projections on top. Every chain is
 immutable and nothing runs until `fetch`/`find`.
 
@@ -127,6 +127,20 @@ One round trip. `where:` values go through ActiveRecord quoting.
 | `count :users, from: User` | `users` | scalar subquery |
 | `sum/min/max ..., column: :amount` | `<name>_sum` etc. | scalar subquery |
 
+`exists`, `count`, `sum`, `min` and `max` all take `where:` and `scope:`:
+
+```ruby
+count :active_accounts, from: Account, where: { active: true }
+count :active_accounts, from: Account, scope: ->(rel) { rel.active }
+
+count  :big_videos, via: :videos, scope: ->(rel) { rel.where(size: 100..) }
+exists :recent_photos, via: :photos, scope: -> { Photo.where(created_at: 1.week.ago..) }
+```
+
+`scope:` receives the target model's relation (or nothing, if the callable takes
+no arguments) and must return a relation for the same model. It runs on every
+compilation, so runtime values stay fresh. `where:` takes a plain hash.
+
 `one` nests to any depth of singular associations:
 
 ```ruby
@@ -143,8 +157,8 @@ user.subscription.plan.name
 
 Foreign keys, primary keys and join direction come from ActiveRecord
 reflection: `belongs_to`, `has_one`, custom `foreign_key:`/`primary_key:`,
-`self.table_name`, self-referential associations and STI type conditions all
-work without extra configuration.
+`self.table_name`, self-referential associations, polymorphic `as:` targets and
+STI type conditions all work without extra configuration.
 
 `has_many` collections are never joined: `exists` and `count` compile to
 correlated subqueries, so root rows are never multiplied and no `GROUP BY` is

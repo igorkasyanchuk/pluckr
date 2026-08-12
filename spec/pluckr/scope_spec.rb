@@ -1,0 +1,221 @@
+# frozen_string_literal: true
+
+RSpec.describe "scope: and where: on aggregates" do
+  let!(:user) { User.create!(email: "user@example.com") }
+
+  describe "independent aggregates" do
+    before do
+      Account.create!(active: true)
+      Account.create!(active: true)
+      Account.create!(active: false)
+    end
+
+    it "accepts a lambda that ignores the relation and returns its own" do
+      define_query("DashboardStats") do
+        schema do
+          count :active_accounts, from: Account, scope: ->(_) { Account.active }
+        end
+      end
+
+      expect(DashboardStats.fetch.active_accounts).to eq(2)
+      expect(DashboardStats.to_sql).to include("#{col(:accounts, :active)} = #{qv(true)}")
+    end
+
+    it "accepts a lambda that narrows the given relation" do
+      define_query("DashboardStats") do
+        schema do
+          count :active_accounts, from: Account, scope: ->(rel) { rel.active }
+        end
+      end
+
+      expect(DashboardStats.fetch.active_accounts).to eq(2)
+    end
+
+    it "accepts a zero-arity callable" do
+      define_query("DashboardStats") do
+        schema do
+          count :active_accounts, from: Account, scope: -> { Account.active }
+        end
+      end
+
+      expect(DashboardStats.fetch.active_accounts).to eq(2)
+    end
+
+    it "combines scope: with where:" do
+      Order.create!(status: "paid", amount: 100)
+      Order.create!(status: "paid", amount: 5)
+      Order.create!(status: "void", amount: 100)
+
+      define_query("RevenueStats") do
+        schema do
+          sum :big_paid_revenue,
+              from: Order,
+              column: :amount,
+              where: { status: "paid" },
+              scope: ->(rel) { rel.where(amount: 50..) }
+        end
+      end
+
+      expect(RevenueStats.fetch.big_paid_revenue).to eq(100)
+    end
+
+    it "still runs as a single statement" do
+      define_query("DashboardStats") do
+        schema do
+          count :accounts, from: Account
+          count :active_accounts, from: Account, scope: ->(rel) { rel.active }
+        end
+      end
+
+      expect(SqlCounter.capture { DashboardStats.fetch }.size).to eq(1)
+    end
+
+    it "quotes values coming from the scope" do
+      define_query("OrderStats") do
+        schema do
+          count :hostile, from: Order, scope: ->(rel) { rel.where(status: "x' OR 1=1 --") }
+        end
+      end
+
+      expect(OrderStats.to_sql).to include(qv("x' OR 1=1 --"))
+      expect(OrderStats.fetch.hostile).to eq(0)
+    end
+  end
+
+  describe "correlated aggregates" do
+    before do
+      Video.create!(user: user, size: 500)
+      Video.create!(user: user, size: 10)
+      Photo.create!(user: user, url: "https://example.com/a.jpg")
+    end
+
+    it "narrows a correlated count" do
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          count :videos
+          count :videos, as: :big_videos, scope: ->(rel) { rel.where(size: 100..) }
+        end
+      end
+
+      result = UserSummary.find(user.id)
+
+      expect(result.videos_count).to eq(2)
+      expect(result.big_videos).to eq(1)
+    end
+
+    it "narrows a correlated exists" do
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          exists :videos, as: :has_huge_video, scope: ->(rel) { rel.where(size: 10_000..) }
+          exists :videos, as: :has_big_video, scope: ->(rel) { rel.where(size: 100..) }
+        end
+      end
+
+      result = UserSummary.find(user.id)
+
+      expect(result.has_huge_video).to be(false)
+      expect(result.has_big_video).to be(true)
+    end
+
+    it "accepts where: on correlated nodes" do
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          count :videos, as: :tiny_videos, where: { size: 10 }
+          exists :videos, as: :has_tiny_video, where: { size: 10 }
+        end
+      end
+
+      result = UserSummary.find(user.id)
+
+      expect(result.tiny_videos).to eq(1)
+      expect(result.has_tiny_video).to be(true)
+    end
+
+    it "keeps the correlation and stays one statement" do
+      other = User.create!(email: "other@example.com")
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          field :id
+          count :videos, as: :big_videos, scope: ->(rel) { rel.where(size: 100..) }
+        end
+      end
+
+      counts = nil
+      statements = SqlCounter.capture { counts = UserSummary.order(:id).fetch }
+
+      expect(statements.size).to eq(1)
+      expect(counts.map(&:big_videos)).to eq([1, 0])
+      expect(counts.map(&:id)).to eq([user.id, other.id])
+    end
+
+    it "applies scope on top of the STI type condition" do
+      Report.create!(user: user, title: "Q1")
+      Report.create!(user: user, title: "Q2")
+      Document.create!(user: user, title: "Q1")
+
+      define_query("UserDocs") do
+        source User
+
+        schema do
+          count :reports, as: :q1_reports, scope: ->(rel) { rel.where(title: "Q1") }
+        end
+      end
+
+      expect(UserDocs.find(user.id).q1_reports).to eq(1)
+    end
+  end
+
+  describe "errors" do
+    it "rejects a non-callable scope at definition time" do
+      expect do
+        define_query("Bad") do
+          schema do
+            count :accounts, from: Account, scope: { active: true }
+          end
+        end
+      end.to raise_error(Pluckr::ConfigurationError, /`count :accounts, scope:` expects a callable/)
+    end
+
+    it "rejects a scope returning the wrong model" do
+      define_query("Bad") do
+        schema do
+          count :accounts, from: Account, scope: ->(_) { Order.all }
+        end
+      end
+
+      expect { Bad.to_sql }
+        .to raise_error(Pluckr::ConfigurationError, /must return an ActiveRecord::Relation for Account/)
+    end
+
+    it "rejects a scope returning something that is not a relation" do
+      define_query("Bad") do
+        schema do
+          count :accounts, from: Account, scope: ->(_) { [1, 2, 3] }
+        end
+      end
+
+      expect { Bad.to_sql }.to raise_error(Pluckr::ConfigurationError, /must return an ActiveRecord::Relation/)
+    end
+
+    it "rejects scope: on a self-referential association" do
+      define_query("Bad") do
+        source User
+
+        schema do
+          count :direct_reports, scope: ->(rel) { rel.where(active: true) }
+        end
+      end
+
+      expect { Bad.to_sql }.to raise_error(Pluckr::ConfigurationError, /self-referential/)
+    end
+  end
+end

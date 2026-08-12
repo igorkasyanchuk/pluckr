@@ -12,6 +12,7 @@ class User < ActiveRecord::Base
   has_many :documents
   has_many :invoices
   has_many :direct_reports, class_name: "User", foreign_key: :manager_id
+  has_many :likes, as: :likeable
   has_many :archived_comments, class_name: "ArchivedComment", foreign_key: :user_id
 end
 
@@ -62,6 +63,11 @@ end
 
 class Photo < ActiveRecord::Base
   belongs_to :user
+  has_many :likes, as: :likeable
+end
+
+class Like < ActiveRecord::Base
+  belongs_to :likeable, polymorphic: true
 end
 
 class Video < ActiveRecord::Base
@@ -73,6 +79,7 @@ class Comment < ActiveRecord::Base
 end
 
 class Account < ActiveRecord::Base
+  scope :active, -> { where(active: true) }
 end
 
 class Order < ActiveRecord::Base

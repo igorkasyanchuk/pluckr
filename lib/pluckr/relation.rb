@@ -16,8 +16,12 @@ module Pluckr
       freeze
     end
 
-    def where(...)
-      spawn(relation.where(...))
+    # `where` with no arguments returns a chain, so `where.not(...)` works like
+    # it does on an ActiveRecord relation.
+    def where(*args, **options, &block)
+      return WhereChain.new(self) if args.empty? && options.empty? && block.nil?
+
+      spawn(relation.where(*args, **options, &block))
     end
 
     def order(...)
@@ -70,14 +74,26 @@ module Pluckr
       "#<Pluckr::Relation #{query_class.name} #{to_sql}>"
     end
 
+    def spawn(new_relation)
+      self.class.new(query_class, new_relation)
+    end
+
+    # Mirrors ActiveRecord::QueryMethods::WhereChain for the operations Pluckr
+    # supports on the root relation.
+    class WhereChain
+      def initialize(pluckr_relation)
+        @pluckr_relation = pluckr_relation
+      end
+
+      def not(...)
+        @pluckr_relation.spawn(@pluckr_relation.relation.where.not(...))
+      end
+    end
+
     private
 
     def model
       query_class.source_model
-    end
-
-    def spawn(new_relation)
-      self.class.new(query_class, new_relation)
     end
   end
 end
