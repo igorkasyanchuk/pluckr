@@ -55,8 +55,10 @@ module Pluckr
     # ActiveRecord orders by primary key when the relation has no order of its
     # own, so that `first` means something. Same here.
     def first
-      # Qualified, because `one` nodes join tables that have an `id` too.
-      ordered = relation.order_values.empty? ? order(model.arel_table[model.primary_key].asc) : self
+      # Qualified, because `one` nodes join tables that have an `id` too, and
+      # per column, because a primary key can be composite.
+      keys = Array(model.primary_key).map { |key| model.arel_table[key].asc }
+      ordered = relation.order_values.empty? ? order(*keys) : self
 
       ordered.limit(1).fetch.first
     end
@@ -67,6 +69,11 @@ module Pluckr
 
     def find(id)
       key = model.primary_key
+      if key.is_a?(Array)
+        raise ConfigurationError,
+              "#{model.name} has a composite primary key; use `where(...).first` instead of `find`"
+      end
+
       result = where(key => id).first
       return result if result
 

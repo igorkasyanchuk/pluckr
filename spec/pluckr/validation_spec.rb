@@ -185,6 +185,13 @@ RSpec.describe "schema validation" do
     expect(UserSummary.find(user.id).to_h).to eq(email: "user@example.com")
   end
 
+  it "names the class that was used when a schema is missing anywhere in the chain" do
+    define_query("ApplicationQuery") { source User }
+    stub_const("Broken", Class.new(ApplicationQuery))
+
+    expect { Broken.to_sql }.to raise_error(Pluckr::ConfigurationError, "Broken has no `schema` block")
+  end
+
   it "rejects reading two databases in one statement" do
     stub_const("Elsewhere", Class.new(ActiveRecord::Base) { self.table_name = "accounts" })
     allow(Elsewhere).to receive(:connection_pool).and_return(Object.new)
@@ -198,6 +205,55 @@ RSpec.describe "schema validation" do
 
     expect { Bad.to_sql }
       .to raise_error(Pluckr::ConfigurationError, /different database connections/)
+  end
+
+  it "checks connections inside nested associations too" do
+    stub_const("Elsewhere", Class.new(ActiveRecord::Base) { self.table_name = "accounts" })
+    allow(Elsewhere).to receive(:connection_pool).and_return(Object.new)
+
+    define_query("Bad") do
+      source User
+
+      schema do
+        one :subscription do
+          field :name
+          count :elsewhere, from: Elsewhere
+        end
+      end
+    end
+
+    expect { Bad.to_sql }
+      .to raise_error(Pluckr::ConfigurationError, /different database connections/)
+  end
+
+  describe "composite primary keys" do
+    let!(:user) { User.create!(email: "user@example.com") }
+    let!(:plan) { Plan.create!(name: "Pro") }
+
+    before { Membership.create!(user_id: user.id, plan_id: plan.id, role: "owner") }
+
+    it "orders `first` by every key column" do
+      define_query("MembershipSummary") do
+        source Membership
+
+        schema { field :role }
+      end
+
+      expect(Membership.primary_key).to eq(%w[user_id plan_id])
+      expect(MembershipSummary.first.role).to eq("owner")
+      expect(MembershipSummary.fetch.size).to eq(1)
+    end
+
+    it "says so instead of building nonsense SQL for find" do
+      define_query("MembershipSummary") do
+        source Membership
+
+        schema { field :role }
+      end
+
+      expect { MembershipSummary.find(1) }
+        .to raise_error(Pluckr::ConfigurationError, /composite primary key/)
+    end
   end
 
   it "rejects associations Pluckr cannot compile yet" do

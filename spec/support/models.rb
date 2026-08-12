@@ -81,6 +81,11 @@ class Comment < ActiveRecord::Base
   belongs_to :user
 end
 
+class Membership < ActiveRecord::Base
+  belongs_to :user
+  belongs_to :plan
+end
+
 class Account < ActiveRecord::Base
   scope :active, -> { where(active: true) }
 end

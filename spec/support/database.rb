@@ -137,6 +137,13 @@ module TestDatabase
       end
       add_index :accounts, :active
 
+      # Composite primary key (Rails 7.1+).
+      create_table :memberships, primary_key: %i[user_id plan_id], force: true do |t|
+        t.bigint :user_id
+        t.bigint :plan_id
+        t.string :role
+      end
+
       # Polymorphic association target.
       create_table :likes, force: true do |t|
         t.bigint :likeable_id

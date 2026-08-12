@@ -85,7 +85,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-231 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+235 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
@@ -135,8 +135,10 @@ and update that file whenever the compiler's output changes.
   identifiers are validated against `column_names` / reflection first.
 - Never instantiate ActiveRecord objects for selected rows.
 - One SQL statement per execution. `has_many` is never joined, and everything a
-  query touches must live on one connection pool (checked when compiling, and
-  when a batch entry is added).
+  query touches must live on one connection pool - checked when compiling,
+  walking nested scopes, and when a batch entry is added.
+- Composite primary keys work for reading and for `first`; `find` refuses them
+  with a message rather than building `table.["a", "b"]`.
 - The compiler holds no mutable state between calls - it compiles fresh on every
   `apply`, so `scope:` callables are re-evaluated and the object stays thread-safe.
 - Compose Arel nodes into the outer relation; do not call `to_sql` on a bare Arel

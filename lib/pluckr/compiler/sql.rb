@@ -66,8 +66,14 @@ module Pluckr
 
       private
 
-      def independent_models
-        schema.nodes.grep(Schema::Aggregate).select(&:independent?).reject(&:relation).map(&:model)
+      def independent_models(scope = schema)
+        scope.nodes.flat_map do |node|
+          case node
+          when Schema::Aggregate then node.independent? && node.relation.nil? ? [node.model] : []
+          when Schema::One then independent_models(node.scope)
+          else []
+          end
+        end
       end
 
       # Accumulator for one compilation pass.

@@ -40,8 +40,14 @@ module Pluckr
       end
 
       def pluckr_schema
-        @pluckr_schema || inherited_from_query(:pluckr_schema) ||
-          raise(ConfigurationError, "#{name} has no `schema` block")
+        declared_schema || raise(ConfigurationError, "#{name} has no `schema` block")
+      end
+
+      # The schema declared here or by a query this one subclasses, or nil.
+      # Kept separate from `pluckr_schema` so the error names the class that was
+      # actually used, not an intermediate base class.
+      def declared_schema
+        @pluckr_schema || inherited_from_query(:declared_schema)
       end
 
       # Source-rooted queries return rows; aggregate-only queries return one object.
