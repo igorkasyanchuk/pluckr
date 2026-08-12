@@ -386,14 +386,14 @@ RSpec.describe "query variations" do
       expect(OrderStats.to_sql).to include("IS NULL")
     end
 
-    it "returns nil for a sum over no rows" do
+    it "returns zero for a sum over no rows" do
       define_query("EmptyStats") do
         schema do
           sum :revenue, from: Order, column: :amount, where: { status: "void" }
         end
       end
 
-      expect(EmptyStats.fetch.revenue).to be_nil
+      expect(EmptyStats.fetch.revenue).to eq(0)
     end
 
     it "counts a specific column" do

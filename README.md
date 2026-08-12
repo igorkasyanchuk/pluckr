@@ -309,7 +309,9 @@ user.created_at    # NoMethodError - not selected
 ```
 
 Values are cast with the model's own column types, so `active` is `true` and
-not `1` on every adapter.
+not `1` on every adapter, and aggregates answer what ActiveRecord would:
+`count` and `sum` are `0` when nothing matched, `min`/`max` are `nil`, because
+no row means no minimum.
 
 They serialise as their data, so `render json:` does the obvious thing:
 

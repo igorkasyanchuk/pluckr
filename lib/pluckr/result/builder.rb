@@ -10,6 +10,17 @@ module Pluckr
       BOOLEAN = ActiveModel::Type::Boolean.new
       INTEGER = ActiveModel::Type::Integer.new
 
+      # Casts one column of a row. `default` covers SQL returning NULL where the
+      # equivalent ActiveRecord call would not: SUM over no rows is NULL in SQL
+      # and 0 in `relation.sum(:column)`.
+      Caster = Struct.new(:type, :default) do
+        def call(value)
+          return default if value.nil?
+
+          type ? type.deserialize(value) : value
+        end
+      end
+
       def initialize(schema, label: "Pluckr::Result")
         @schema = schema
         @classes = {}
@@ -37,17 +48,21 @@ module Pluckr
       # and raw SQL carries no column type, so Pluckr casts values itself.
       def caster_for(node, model)
         case node
-        when Schema::Field then model.type_for_attribute(node.column)
-        when Schema::Exists then BOOLEAN
+        when Schema::Field then Caster.new(model.type_for_attribute(node.column))
+        when Schema::Exists then Caster.new(BOOLEAN)
         when Schema::Aggregate then aggregate_caster(node)
         end
       end
 
       def aggregate_caster(node)
         case node.operation
-        when :count then INTEGER
-        when :exists then BOOLEAN
-        else node.target_model.type_for_attribute(node.column)
+        when :count then Caster.new(INTEGER)
+        when :exists then Caster.new(BOOLEAN)
+        else
+          type = node.target_model.type_for_attribute(node.column)
+          # `sum` answers 0 for no rows, like ActiveRecord; `min`/`max` stay nil,
+          # because no row means no minimum.
+          Caster.new(type, node.operation == :sum ? type.cast(0) : nil)
         end
       end
 
@@ -60,7 +75,7 @@ module Pluckr
             if node.is_a?(Schema::One)
               hydrate_one(node, path, row)
             else
-              cast(casters[node.output], row[Aliases.output(path, node.output)])
+              casters[node.output].call(row[Aliases.output(path, node.output)])
             end
         end
 
@@ -76,11 +91,6 @@ module Pluckr
         hydrate(node.scope, child_path, row)
       end
 
-      def cast(caster, value)
-        return value if value.nil? || caster.nil?
-
-        caster.deserialize(value)
-      end
     end
   end
 end

@@ -77,7 +77,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-190 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+191 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
@@ -131,7 +131,8 @@ and update that file whenever the compiler's output changes.
   `apply`, so `scope:` callables are re-evaluated and the object stays thread-safe.
 - Adapter-neutral: build SQL with Arel, quote through the connection, and cast
   result values with the model's column types (only PostgreSQL returns typed
-  values for raw SQL).
+  values for raw SQL). Where SQL and ActiveRecord disagree, follow ActiveRecord:
+  `sum` over no rows is 0, not NULL (`Result::Builder::Caster#default`).
 - Every behavior change needs specs, including the SQL shape and, where it
   matters, a statement count via `SqlCounter.capture`.
 - Prefer failing loudly over compiling questionable SQL.

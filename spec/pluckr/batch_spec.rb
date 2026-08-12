@@ -203,8 +203,19 @@ RSpec.describe Pluckr::Batch do
       expect(Pluckr.batch { |b| b.count User, as: :users }.users).to eq(2)
     end
 
-    it "returns nil for a sum over no rows" do
-      expect(Pluckr.batch { |b| b.sum Order.all, :amount, as: :revenue }.revenue).to be_nil
+    it "returns zero for a sum over no rows, like ActiveRecord" do
+      expect(Pluckr.batch { |b| b.sum Order.all, :amount, as: :revenue }.revenue).to eq(0)
+      expect(Order.all.sum(:amount)).to eq(0)
+    end
+
+    it "returns nil for a min or max over no rows" do
+      result = Pluckr.batch do |b|
+        b.min Order.all, :amount, as: :smallest
+        b.max Order.all, :amount, as: :largest
+      end
+
+      expect(result.smallest).to be_nil
+      expect(result.largest).to be_nil
     end
 
     it "returns zero for a count over no rows" do

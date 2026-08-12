@@ -23,6 +23,8 @@
   `default_scope`d associations.
 - Result objects serialise as their data: `as_json`, `to_json` and `to_hash`, so
   `render json: result` no longer emits `{"attributes": {...}}`.
+- `sum` returns 0 rather than nil when nothing matched, matching
+  `relation.sum(:column)`; `min`/`max` still return nil.
 - `where:` accepts a callable returning a Hash, evaluated on every compilation,
   so `-> { { created_at: 1.week.ago.. } }` is not frozen at class-load time.
 - Benchmarks in `benchmarks/read_models.rb`, results in `BENCHMARKS.md`.
