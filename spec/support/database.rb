@@ -143,10 +143,12 @@ module TestDatabase
       add_index :likes, %i[likeable_type likeable_id]
 
       create_table :orders, force: true do |t|
+        t.references :user
         t.string :status
         t.integer :amount
       end
       add_index :orders, %i[status amount]
+      add_index :orders, %i[user_id status]
     end
   end
 

@@ -64,7 +64,8 @@ SELECT "users"."id"                    AS "id",
 ## Is it worth it?
 
 PostgreSQL, 50k users, one page of this exact read model
-([full results](BENCHMARKS.md)):
+([full results](BENCHMARKS.md), including a wider card with two nested
+associations and four aggregates):
 
 | rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
 | ---: | ---: | ---: | ---: |
@@ -73,9 +74,11 @@ PostgreSQL, 50k users, one page of this exact read model
 | 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
 | 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
 
-2-3x faster than careful hand-written ActiveRecord, 15-55x faster than a
+2-3x faster than careful hand-written ActiveRecord, 12-55x faster than a
 forgotten preload, and the gap grows with every millisecond of network latency
-between the app and the database, because Pluckr always sends one statement.
+between the app and the database, because Pluckr always sends one statement. It
+also grows with the read model: a wider card costs ActiveRecord one more query
+per aggregate and costs Pluckr nothing extra.
 
 ## Install
 

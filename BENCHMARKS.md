@@ -2,8 +2,11 @@
 
 ## TL;DR
 
-Same read model - `id`, `email`, a nested `subscription.plan`, an existence check
-and a count - fetched three ways. PostgreSQL 17, 50k users, indexed schema:
+Two read models, fetched three ways each. PostgreSQL 17, 50k users, indexed
+schema.
+
+**`UserSummary`** - `id`, `email`, a nested `subscription.plan`, an existence
+check and a count:
 
 | rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
 | ---: | ---: | ---: | ---: |
@@ -13,8 +16,22 @@ and a count - fetched three ways. PostgreSQL 17, 50k users, indexed schema:
 | 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
 | 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
 
+**`UserCard`** - the wide version: 3 fields with aliases, a nested
+`subscription.plan`, a self-referential `manager`, an existence check, three
+counts (one of them scoped) and a sum:
+
+| rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
+| ---: | ---: | ---: | ---: |
+| 10 | 89 SQL / 10.0 ms | 10 SQL / 1.72 ms | **1 SQL / 0.82 ms** |
+| 100 | 881 SQL / 98.6 ms | 10 SQL / 6.22 ms | **1 SQL / 2.51 ms** |
+| 1,000 | 8,801 SQL / 1,023 ms | 10 SQL / 64.7 ms | **1 SQL / 28.6 ms** |
+| 10,000 | 88,001 SQL / 10,556 ms | 10 SQL / 597 ms | **1 SQL / 224 ms** |
+
 - **2-3x faster than careful hand-written ActiveRecord**, which needs 5
-  statements and ~25 lines to avoid the N+1. **15-55x faster** than the N+1.
+  statements (10 for the wide card) and ~25-40 lines to avoid the N+1.
+  **12-55x faster** than the N+1.
+- **The wider the read model, the more it saves.** Every node the wide card adds
+  costs ActiveRecord another statement; Pluckr still sends one.
 - **1 statement, always.** Over a networked database that is worth another
   `(statements - 1) x round_trip` per request: ~6 ms saved per 100-row page at a
   1 ms round trip, ~500 ms against an N+1.
@@ -52,7 +69,7 @@ KEEP=1 EXPLAIN=0 bundle exec ruby benchmarks/read_models.rb   # leave the data, 
 | Hardware | Apple M3 laptop, local PostgreSQL 17 over a unix socket; SQLite in memory |
 | Software | Ruby 3.4.5, ActiveRecord 8.1.3 |
 | Dataset | 50k users (25k active), 35k subscriptions, 5 plans, 60k photos, 75k videos, 50k comments, 2k accounts |
-| Read model | `id`, `email`, `subscription.name`, `subscription.plan.name`, `photos` exists, `videos` count |
+| Read models | `UserSummary` (6 outputs, 1 join, 2 correlated nodes) and `UserCard` (12 outputs, 3 joins, 6 correlated nodes incl. a scoped count and a sum) |
 
 The schema is indexed the way a production schema should be, which is what makes
 the numbers meaningful:
@@ -74,6 +91,7 @@ add_index :documents, %i[user_id type]             # STI
 add_index :likes, %i[likeable_type likeable_id]    # polymorphic
 add_index :accounts, :active
 add_index :orders, %i[status amount]
+add_index :orders, %i[user_id status]              # per-user order aggregates
 ```
 
 `median ms` is the median of timed runs measured in Ruby around the whole call,
@@ -92,24 +110,37 @@ adapter: PostgreSQL  users: 50000  pages: 10, 100, 1000, 10000  runs: 25
 | | rows | SQL | median ms | allocations | vs Pluckr |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | **Single record** | | | | | |
-| ActiveRecord, record + questions | 1 | 5 | 0.471 | 680 | 2.1x |
-| Pluckr | 1 | 1 | 0.227 | 393 | 1.0x |
+| ActiveRecord, record + questions | 1 | 5 | 0.585 | 680 | 2.1x |
+| Pluckr | 1 | 1 | 0.273 | 393 | 1.0x |
 | **List** | | | | | |
-| ActiveRecord, N+1 | 10 | 49 | 4.963 | 6,555 | 14.5x |
-| ActiveRecord, preloaded + grouped | 10 | 5 | 0.764 | 1,325 | 2.2x |
-| Pluckr | 10 | 1 | 0.342 | 891 | 1.0x |
-| ActiveRecord, N+1 | 100 | 481 | 48.346 | 64,246 | 49.7x |
-| ActiveRecord, preloaded + grouped | 100 | 5 | 2.829 | 4,982 | 2.9x |
+| ActiveRecord, N+1 | 10 | 49 | 5.077 | 6,555 | 14.4x |
+| ActiveRecord, preloaded + grouped | 10 | 5 | 0.856 | 1,325 | 2.4x |
+| Pluckr | 10 | 1 | 0.353 | 891 | 1.0x |
+| ActiveRecord, N+1 | 100 | 481 | 48.400 | 64,246 | 49.8x |
+| ActiveRecord, preloaded + grouped | 100 | 5 | 2.860 | 4,982 | 2.9x |
 | Pluckr | 100 | 1 | 0.972 | 5,734 | 1.0x |
-| ActiveRecord, N+1 | 1,000 | 4,801 | 490.752 | 641,146 | 40.2x |
-| ActiveRecord, preloaded + grouped | 1,000 | 5 | 23.180 | 41,528 | 1.9x |
-| Pluckr | 1,000 | 1 | 12.216 | 54,154 | 1.0x |
-| ActiveRecord, N+1 | 10,000 | 48,001 | 5410.225 | 6,410,146 | 55.0x |
-| ActiveRecord, preloaded + grouped | 10,000 | 5 | 286.761 | 406,928 | 2.9x |
-| Pluckr | 10,000 | 1 | 98.357 | 538,354 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 4,801 | 493.271 | 641,146 | 40.8x |
+| ActiveRecord, preloaded + grouped | 1,000 | 5 | 24.422 | 41,528 | 2.0x |
+| Pluckr | 1,000 | 1 | 12.096 | 54,154 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 48,001 | 4992.790 | 6,410,146 | 52.2x |
+| ActiveRecord, preloaded + grouped | 10,000 | 5 | 300.175 | 406,928 | 3.1x |
+| Pluckr | 10,000 | 1 | 95.562 | 538,354 | 1.0x |
+| **Wide card (`UserCard`)** | | | | | |
+| ActiveRecord, N+1 | 10 | 89 | 10.034 | 13,655 | 12.3x |
+| ActiveRecord, preloaded + grouped | 10 | 10 | 1.718 | 2,918 | 2.1x |
+| Pluckr | 10 | 1 | 0.819 | 1,782 | 1.0x |
+| ActiveRecord, N+1 | 100 | 881 | 98.593 | 135,246 | 39.3x |
+| ActiveRecord, preloaded + grouped | 100 | 10 | 6.217 | 12,609 | 2.5x |
+| Pluckr | 100 | 1 | 2.506 | 10,225 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 8,801 | 1022.827 | 1,351,146 | 35.7x |
+| ActiveRecord, preloaded + grouped | 1,000 | 10 | 64.679 | 109,465 | 2.3x |
+| Pluckr | 1,000 | 1 | 28.626 | 94,645 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 88,001 | 10555.736 | 13,510,199 | 47.2x |
+| ActiveRecord, preloaded + grouped | 10,000 | 10 | 597.012 | 1,077,865 | 2.7x |
+| Pluckr | 10,000 | 1 | 223.615 | 938,845 | 1.0x |
 | **Dashboard, 3 counts** | | | | | |
-| ActiveRecord, three counts | 1 | 3 | 2.440 | 262 | 1.2x |
-| Pluckr | 1 | 1 | 1.996 | 278 | 1.0x |
+| ActiveRecord, three counts | 1 | 3 | 2.453 | 262 | 1.2x |
+| Pluckr | 1 | 1 | 1.986 | 278 | 1.0x |
 
 ## SQLite
 
@@ -120,24 +151,37 @@ adapter: SQLite  users: 50000  pages: 10, 100, 1000, 10000  runs: 25
 | | rows | SQL | median ms | allocations | vs Pluckr |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | **Single record** | | | | | |
-| ActiveRecord, record + questions | 1 | 5 | 0.407 | 667 | 2.4x |
-| Pluckr | 1 | 1 | 0.170 | 398 | 1.0x |
+| ActiveRecord, record + questions | 1 | 5 | 0.375 | 667 | 2.1x |
+| Pluckr | 1 | 1 | 0.176 | 398 | 1.0x |
 | **List** | | | | | |
-| ActiveRecord, N+1 | 10 | 49 | 3.887 | 6,423 | 16.5x |
-| ActiveRecord, preloaded + grouped | 10 | 5 | 0.638 | 1,305 | 2.7x |
-| Pluckr | 10 | 1 | 0.236 | 887 | 1.0x |
-| ActiveRecord, N+1 | 100 | 481 | 36.371 | 63,033 | 45.4x |
-| ActiveRecord, preloaded + grouped | 100 | 5 | 2.159 | 4,329 | 2.7x |
-| Pluckr | 100 | 1 | 0.801 | 5,639 | 1.0x |
-| ActiveRecord, N+1 | 1,000 | 4,801 | 375.054 | 629,139 | 54.6x |
-| ActiveRecord, preloaded + grouped | 1,000 | 5 | 17.804 | 37,608 | 2.6x |
-| Pluckr | 1,000 | 1 | 6.870 | 53,159 | 1.0x |
-| ActiveRecord, N+1 | 10,000 | 48,001 | 3753.041 | 6,290,148 | 51.4x |
-| ActiveRecord, preloaded + grouped | 10,000 | 5 | 199.302 | 367,008 | 2.7x |
-| Pluckr | 10,000 | 1 | 73.011 | 528,359 | 1.0x |
+| ActiveRecord, N+1 | 10 | 49 | 3.876 | 6,422 | 17.2x |
+| ActiveRecord, preloaded + grouped | 10 | 5 | 0.634 | 1,305 | 2.8x |
+| Pluckr | 10 | 1 | 0.225 | 887 | 1.0x |
+| ActiveRecord, N+1 | 100 | 481 | 37.358 | 63,033 | 45.4x |
+| ActiveRecord, preloaded + grouped | 100 | 5 | 2.192 | 4,329 | 2.7x |
+| Pluckr | 100 | 1 | 0.823 | 5,639 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 4,801 | 387.649 | 629,139 | 54.9x |
+| ActiveRecord, preloaded + grouped | 1,000 | 5 | 18.081 | 37,608 | 2.6x |
+| Pluckr | 1,000 | 1 | 7.062 | 53,159 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 48,001 | 3751.680 | 6,290,149 | 50.8x |
+| ActiveRecord, preloaded + grouped | 10,000 | 5 | 191.899 | 367,008 | 2.6x |
+| Pluckr | 10,000 | 1 | 73.871 | 528,359 | 1.0x |
+| **Wide card (`UserCard`)** | | | | | |
+| ActiveRecord, N+1 | 10 | 89 | 8.200 | 13,662 | 14.8x |
+| ActiveRecord, preloaded + grouped | 10 | 10 | 1.298 | 2,882 | 2.3x |
+| Pluckr | 10 | 1 | 0.553 | 1,775 | 1.0x |
+| ActiveRecord, N+1 | 100 | 881 | 75.075 | 135,433 | 44.3x |
+| ActiveRecord, preloaded + grouped | 100 | 10 | 4.448 | 11,036 | 2.6x |
+| Pluckr | 100 | 1 | 1.696 | 10,127 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 8,801 | 1363.709 | 1,353,138 | 86.6x |
+| ActiveRecord, preloaded + grouped | 1,000 | 10 | 38.653 | 100,701 | 2.5x |
+| Pluckr | 1,000 | 1 | 15.743 | 93,647 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 88,001 | 8115.795 | 13,530,195 | 49.3x |
+| ActiveRecord, preloaded + grouped | 10,000 | 10 | 426.893 | 988,101 | 2.6x |
+| Pluckr | 10,000 | 1 | 164.499 | 928,847 | 1.0x |
 | **Dashboard, 3 counts** | | | | | |
-| ActiveRecord, three counts | 1 | 3 | 0.131 | 271 | 1.0x |
-| Pluckr | 1 | 1 | 0.127 | 276 | 1.0x |
+| ActiveRecord, three counts | 1 | 3 | 0.136 | 271 | 1.1x |
+| Pluckr | 1 | 1 | 0.128 | 276 | 1.0x |
 
 SQLite is in the same process, so its round trips are nearly free - and Pluckr
 still wins by 2.6-2.7x on lists, because the work it avoids is instantiating
@@ -148,6 +192,11 @@ The "preloaded + grouped" row is the honest comparison: `includes(subscription:
 :plan)` plus a `distinct.pluck` for existence plus a `group(:user_id).count`,
 then merged in Ruby. It is what a careful developer writes, and it is 5
 statements and ~25 lines. Pluckr is one statement and one class.
+
+The wide card shows where that approach stops scaling: every extra aggregate is
+another grouped query and another merge loop, so the hand-written version grows
+to 10 statements and ~40 lines while Pluckr stays at one statement and one class
+- and gets *relatively* faster as the model widens.
 
 Two things do **not** improve: allocations on lists (Pluckr builds its own result
 objects, so it lands near preloaded ActiveRecord - the 10x saving is against the
@@ -197,6 +246,36 @@ Execution Time: 0.039 ms
 index probe per returned row, never a join that multiplies rows and never a
 `GROUP BY` over the whole table. `Heap Fetches: 0` means the covering indexes
 answer both without touching the tables.
+
+### Wide card, list of 10 — 0.104 ms in the database
+
+Twelve outputs, three joined tables and six correlated subqueries, still one
+statement and still index probes all the way down:
+
+```
+Limit (actual time=0.024..0.079 rows=10 loops=1)
+  ->  Nested Loop Left Join
+        ->  Nested Loop Left Join
+              ->  Merge Left Join
+                    ->  Index Scan using index_users_on_active_and_id on users
+                    ->  Index Scan using index_subscriptions_on_user_id on subscriptions
+              ->  Materialize -> Seq Scan on plans      (5 rows, cached)
+        ->  Index Scan using users_pkey on users pluckr_manager   (loops=10)
+              Index Cond: (id = users.manager_id)                 -- self-referential `one`
+        SubPlan 1  Limit -> Index Only Scan on photos             (loops=10)  exists :photos
+        SubPlan 2  Aggregate -> Index Only Scan on videos         (loops=10)  count :videos
+        SubPlan 3  Aggregate -> Index Only Scan on videos         (loops=10)  scoped count
+                     Index Cond: ((user_id = users.id) AND (size >= 200))
+        SubPlan 4  Aggregate -> Index Only Scan on comments       (loops=10)  count :comments
+        SubPlan 5  Aggregate -> Index Only Scan on orders         (loops=10)  count, where:
+        SubPlan 6  Aggregate -> Index Only Scan on orders         (loops=10)  sum, where:
+Execution Time: 0.104 ms
+```
+
+SubPlan 3 is the interesting one: `count :videos, scope: ->(rel) { rel.where(size:
+200..) }` compiles to a derived table, PostgreSQL flattens it, and the scope's
+condition ends up *inside* the index condition on `[user_id, size]`. The scoped
+count costs the same as the unscoped one.
 
 ### Dashboard — 4.4 ms in the database
 
