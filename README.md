@@ -142,7 +142,9 @@ user.subscription.plan.name
 ```
 
 Foreign keys, primary keys and join direction come from ActiveRecord
-reflection — `belongs_to`, `has_one` and custom `foreign_key:` included.
+reflection: `belongs_to`, `has_one`, custom `foreign_key:`/`primary_key:`,
+`self.table_name`, self-referential associations and STI type conditions all
+work without extra configuration.
 
 `has_many` collections are never joined: `exists` and `count` compile to
 correlated subqueries, so root rows are never multiplied and no `GROUP BY` is
@@ -205,8 +207,9 @@ The compiler never sees DSL state, so new node types are additive.
 
 - `many` (nested collections)
 - raw SQL fields, manual joins
-- `has_many :through`, polymorphic and scoped associations (these raise
-  `Pluckr::UnsupportedAssociation`)
+- `has_many :through`, polymorphic and scoped associations, and associations
+  whose model has a `default_scope` (these raise
+  `Pluckr::UnsupportedAssociation` rather than silently ignoring the scope)
 - writes, serializers, pagination beyond `limit`/`offset`, caching
 
 ## What Pluckr is not

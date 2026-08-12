@@ -84,6 +84,12 @@ module Pluckr
                 "`#{owner.name}##{name}` is a :through association, which Pluckr does not support yet"
         end
 
+        if klass.default_scopes.any?
+          raise UnsupportedAssociation,
+                "`#{owner.name}##{name}` targets #{klass.name}, which has a default_scope " \
+                "that Pluckr does not apply yet"
+        end
+
         if reflection.scope
           raise UnsupportedAssociation,
                 "`#{owner.name}##{name}` has a scope, which Pluckr does not apply yet"

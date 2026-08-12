@@ -63,12 +63,37 @@ module TestDatabase
       create_table :users, force: true do |t|
         t.string :email
         t.boolean :active, default: true, null: false
+        t.bigint :manager_id           # self-referential association
+        t.string :region_code          # points at a non-`id` primary key
         t.timestamps
       end
 
+      # Custom (string) primary key.
+      create_table :regions, primary_key: :code, id: :string, force: true do |t|
+        t.string :title
+      end
+
+      # Custom table name.
+      create_table :legacy_invoices, force: true do |t|
+        t.references :user
+        t.integer :cents
+      end
+
+      # Single table inheritance.
+      create_table :documents, force: true do |t|
+        t.references :user
+        t.string :type
+        t.string :title
+      end
+
       create_table :plans, force: true do |t|
+        t.references :vendor
         t.string :name
         t.integer :price
+      end
+
+      create_table :vendors, force: true do |t|
+        t.string :name
       end
 
       create_table :subscriptions, force: true do |t|

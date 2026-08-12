@@ -75,10 +75,11 @@ module Pluckr
         association = node.association
         child_table = association.klass.arel_table.alias(Aliases.table(child_path))
 
-        @joins << Arel::Nodes::OuterJoin.new(
-          child_table,
-          Arel::Nodes::On.new(association.join_condition(child_table, owner_table))
-        )
+        condition = association.join_condition(child_table, owner_table)
+        sti = sti_condition(association.klass, child_table)
+        condition = condition.and(sti) if sti
+
+        @joins << Arel::Nodes::OuterJoin.new(child_table, Arel::Nodes::On.new(condition))
 
         # Presence marker: tells "no associated row" apart from "row with NULL columns".
         project child_table[association.primary_key], Aliases.presence(child_path)
@@ -96,6 +97,7 @@ module Pluckr
         subquery = Arel::SelectManager.new(table)
                    .project(Arel.sql("1"))
                    .where(node.association.join_condition(table, owner_table))
+        subquery = restrict_to_sti(subquery, node.association.klass, table)
 
         Arel::Nodes::Exists.new(subquery.ast)
       end
@@ -106,6 +108,7 @@ module Pluckr
         subquery = Arel::SelectManager.new(table)
                    .project(aggregate_function(node, table))
                    .where(node.association.join_condition(table, owner_table))
+        subquery = restrict_to_sti(subquery, node.association.klass, table)
 
         Arel::Nodes::Grouping.new(subquery.ast)
       end
@@ -132,6 +135,20 @@ module Pluckr
         else
           raise Error, "unsupported aggregate operation #{node.operation}"
         end
+      end
+
+      def restrict_to_sti(subquery, klass, table)
+        condition = sti_condition(klass, table)
+        condition ? subquery.where(condition) : subquery
+      end
+
+      # Single table inheritance: an association to an STI child must be
+      # restricted to its own types. `type_condition` accepts the aliased table,
+      # which is why Pluckr uses it instead of rebuilding the condition.
+      def sti_condition(klass, table)
+        return nil unless klass.finder_needs_type_condition?
+
+        klass.send(:type_condition, table)
       end
 
       def subquery_table(association)
