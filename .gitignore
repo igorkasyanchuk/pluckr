@@ -2,3 +2,4 @@
 /pkg/
 /tmp/
 Gemfile.lock
+dev/*.sqlite3

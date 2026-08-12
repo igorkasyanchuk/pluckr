@@ -298,6 +298,40 @@ identical data, and prints `EXPLAIN ANALYZE` for the generated SQL.
 query plans, how cost scales with page size, what a missing foreign key index
 costs (123x), and what to expect once the database is a network hop away.
 
+## Try it
+
+```bash
+bin/setup      # creates a dev database (SQLite file), loads a schema, seeds it
+bin/console    # IRB with the models, seeds and example queries loaded
+```
+
+```
+Pluckr 0.1.0 sandbox - sqlite3 dev/pluckr_dev.sqlite3
+users: 21  subscriptions: 14  plans: 3  photos: 29  videos: 31  comments: 49
+
+>> UserSummary.find(2).to_h
+=> {id: 2, email: "user1@example.com",
+    subscription: {id: 1, name: "sub-1", plan: {name: "Pro", price_cents: 2900}},
+    photos_exists: true, videos_count: 3}
+
+>> statements { UserSummary.where(active: true).limit(5).fetch }
+1. SELECT "users"."id" AS "id", ...
+=> 1
+```
+
+`dev/queries.rb` holds three example read models (`UserSummary`, `UserCard`,
+`DashboardStats`) covering aliases, nesting, `via:`, `scope:` and dashboards -
+edit them and reload the console. Console helpers: `sql(query)`,
+`explain(query, analyze: true)`, `statements { ... }`, `reseed!`, `reset!`,
+`Dev.log!`, `Dev.counts`.
+
+PostgreSQL or MySQL instead of SQLite:
+
+```bash
+DB=postgres bin/setup && DB=postgres bin/console
+SEED_USERS=5000 DB=postgres bin/setup
+```
+
 ## Development
 
 ```bash

@@ -71,6 +71,19 @@ Assertions about SQL must build expected fragments with the helpers in
 `spec/support/sql_helpers.rb` (`q`, `qt`, `col`, `qv`, `aliased_table`), never
 with hard-coded double quotes - the three adapters quote differently.
 
+## Dev sandbox
+
+```bash
+bin/setup      # create + seed the dev database (DB=sqlite|postgres|mysql)
+bin/console    # IRB with dev/ loaded
+```
+
+`dev/` is a throwaway application: `schema.rb`, `models.rb`, `seeds.rb`
+(deterministic), `queries.rb` (example read models) and `console_helpers.rb`
+(`sql`, `explain`, `statements`). It is not part of the gem - `pluckr.gemspec`
+only ships `lib/`. Query classes validate columns as they load, so `dev/boot.rb`
+requires `queries.rb` only once the schema exists.
+
 ## Benchmarks
 
 ```bash

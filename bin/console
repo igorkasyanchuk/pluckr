@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# IRB with the sandbox database, models and example queries loaded.
+#
+#   bin/console                 sqlite
+#   DB=postgres bin/console
+
+require "bundler/setup"
+require "irb"
+require_relative "../dev/boot"
+
+unless Dev.ready?
+  abort <<~SETUP
+    No schema in #{Dev.describe}.
+
+    Run bin/setup first#{" (DB=#{Dev::ADAPTER} bin/setup)" unless Dev::ADAPTER == "sqlite"}.
+  SETUP
+end
+
+require_relative "../dev/console_helpers"
+
+puts <<~BANNER
+  Pluckr #{Pluckr::VERSION} sandbox - #{Dev.describe}
+  #{Dev.counts.map { |table, count| "#{table}: #{count}" }.join("  ")}
+
+  Queries:  UserSummary, UserCard, DashboardStats     (see dev/queries.rb)
+  Models:   User, Subscription, Plan, Photo, Video, Comment, Account, Order
+
+    UserSummary.find(User.first.id).to_h
+    UserSummary.where(active: true).order(created_at: :desc).limit(5).fetch
+    DashboardStats.fetch.to_h
+
+  Helpers:  sql(query)  explain(query, analyze: true)  statements { ... }
+            reseed!  reset!  Dev.log!  Dev.counts
+
+BANNER
+
+IRB.start
