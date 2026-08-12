@@ -43,19 +43,39 @@ user.videos_count   # => 2
 user.to_h           # => {id: 1, email: "...", subscription: {...}, photos_exists: true, videos_count: 2}
 ```
 
-One statement:
+One statement, exactly as `UserSummary.to_sql` prints it:
 
 ```sql
-SELECT "users"."id" AS "id",
-       "users"."email" AS "email",
-       "pluckr_subscription"."id" AS "subscription.id",
-       "pluckr_subscription"."name" AS "subscription.name",
-       EXISTS (SELECT 1 FROM "photos" "p1" WHERE "p1"."user_id" = "users"."id") AS "photos_exists",
-       (SELECT COUNT(*) FROM "videos" "p2" WHERE "p2"."user_id" = "users"."id") AS "videos_count"
+SELECT "users"."id"                    AS "id",
+       "users"."email"                 AS "email",
+       "pluckr_subscription"."id"      AS "__pluckr.subscription.present",
+       "pluckr_subscription"."id"      AS "subscription.id",
+       "pluckr_subscription"."name"    AS "subscription.name",
+       EXISTS (SELECT 1 FROM "photos" "pluckr_sub_1"
+                WHERE "pluckr_sub_1"."user_id" = "users"."id"
+                LIMIT 1 OFFSET 0)      AS "photos_exists",
+       (SELECT COUNT(*) FROM "videos" "pluckr_sub_2"
+         WHERE "pluckr_sub_2"."user_id" = "users"."id") AS "videos_count"
   FROM "users"
   LEFT OUTER JOIN "subscriptions" "pluckr_subscription"
     ON "pluckr_subscription"."user_id" = "users"."id"
 ```
+
+## Is it worth it?
+
+PostgreSQL, 50k users, one page of this exact read model
+([full results](BENCHMARKS.md)):
+
+| rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
+| ---: | ---: | ---: | ---: |
+| 10 | 49 SQL / 4.96 ms | 5 SQL / 0.76 ms | **1 SQL / 0.34 ms** |
+| 100 | 481 SQL / 48.3 ms | 5 SQL / 2.83 ms | **1 SQL / 0.97 ms** |
+| 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
+| 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
+
+2-3x faster than careful hand-written ActiveRecord, 15-55x faster than a
+forgotten preload, and the gap grows with every millisecond of network latency
+between the app and the database, because Pluckr always sends one statement.
 
 ## Install
 
@@ -78,9 +98,10 @@ UserSummary.where(active: true)
 UserSummary.where(active: true).to_sql
 ```
 
-`where`/`where.not`/`order`/`limit`/`offset` are ActiveRecord's own — Pluckr passes them
-through to the root relation and adds its projections on top. Every chain is
-immutable and nothing runs until `fetch`/`find`.
+`where`/`where.not`/`order`/`limit`/`offset` are ActiveRecord's own - Pluckr
+passes them through to the root relation and adds its projections on top. Every
+chain is immutable, nothing runs until `fetch`/`find`/`first`, and every
+execution is exactly one statement no matter how many nodes the schema has.
 
 ## Dashboards
 
@@ -120,7 +141,7 @@ One round trip. `where:` values go through ActiveRecord quoting.
 | `field :email, as: :contact` | `contact` | selected column |
 | `one :subscription do ... end` | `subscription` (or `nil`) | `LEFT OUTER JOIN` |
 | `one :plan, via: :subscription do ... end` | `plan` | `LEFT OUTER JOIN` |
-| `exists :photos` | `photos_exists` | correlated `EXISTS` |
+| `exists :photos` | `photos_exists` | correlated `EXISTS`, index probe per row |
 | `exists :photos, as: :has_photos` | `has_photos` | correlated `EXISTS` |
 | `count :videos` | `videos_count` | scalar subquery |
 | `count :videos, as: :n_videos` | `n_videos` | scalar subquery |
@@ -181,7 +202,10 @@ STI type conditions all work without extra configuration.
 
 `has_many` collections are never joined: `exists` and `count` compile to
 correlated subqueries, so root rows are never multiplied and no `GROUP BY` is
-needed.
+needed. The `LIMIT 1 OFFSET 0` on `EXISTS` is an optimisation fence - without it
+PostgreSQL rewrites the subquery into a full scan of the child table, which
+costs 50x on a paged query. [BENCHMARKS.md](BENCHMARKS.md#why-exists-carries-limit-1-offset-0)
+has the measurements.
 
 ### Missing vs NULL
 
@@ -218,7 +242,13 @@ one :unknown           # Pluckr::UnknownAssociation: User does not have associat
 one :photos            # Pluckr::InvalidAssociation: `User#photos` is a has_many association
                        #   and cannot be used with `one`
 field :id              # Pluckr::MissingSource (no `source` declared)
+schema { }             # Pluckr::ConfigurationError: `schema` block is empty
+count :x, scope: {}    # Pluckr::ConfigurationError: `scope:` expects a callable
 ```
+
+The rest raise on first compilation, where the context exists to detect them: a
+`scope:` returning the wrong model, `limit`/`offset`/`group` inside a scope, and
+output aliases longer than the database's identifier limit.
 
 ## How it works
 
@@ -240,9 +270,10 @@ The compiler never sees DSL state, so new node types are additive.
 
 - `many` (nested collections)
 - raw SQL fields, manual joins
-- `has_many :through`, polymorphic and scoped associations, and associations
-  whose model has a `default_scope` (these raise
-  `Pluckr::UnsupportedAssociation` rather than silently ignoring the scope)
+- `has_many :through`, polymorphic `belongs_to`, associations with their own
+  scope, and associations whose model has a `default_scope` (these raise
+  `Pluckr::UnsupportedAssociation` rather than silently ignoring the scope).
+  Polymorphic `has_many ..., as:` targets and STI children *are* supported.
 - writes, serializers, pagination beyond `limit`/`offset`, caching
 
 ## What Pluckr is not
@@ -253,24 +284,19 @@ and admin tables, dashboards, reports, background-job payloads.
 
 ## Benchmarks
 
-One statement instead of five. PostgreSQL, 50k users, a list of records with a
-nested association, an existence check and a count:
-
-| rows | ActiveRecord N+1 | ActiveRecord preloaded + grouped | Pluckr |
-| ---: | ---: | ---: | ---: |
-| 10 | 49 SQL / 4.96 ms | 5 SQL / 0.76 ms | **1 SQL / 0.34 ms** |
-| 100 | 481 SQL / 48.3 ms | 5 SQL / 2.83 ms | **1 SQL / 0.97 ms** |
-| 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
-| 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
-
-[BENCHMARKS.md](BENCHMARKS.md) has the SQLite numbers too, the `EXPLAIN ANALYZE`
-plans, why `exists` carries an optimisation fence, what a missing foreign key
-index costs (123x), and what to expect once the database is a network hop away.
-
 ```bash
 bundle exec ruby benchmarks/read_models.rb            # PostgreSQL
 DB=sqlite bundle exec ruby benchmarks/read_models.rb  # SQLite
+PAGES=25,250 USERS=200000 bundle exec ruby benchmarks/read_models.rb
 ```
+
+The script seeds a dataset, runs the same read model as naive ActiveRecord,
+hand-tuned ActiveRecord and Pluckr at four page sizes, verifies all three return
+identical data, and prints `EXPLAIN ANALYZE` for the generated SQL.
+
+[BENCHMARKS.md](BENCHMARKS.md) has the numbers for PostgreSQL and SQLite, the
+query plans, how cost scales with page size, what a missing foreign key index
+costs (123x), and what to expect once the database is a network hop away.
 
 ## Development
 

@@ -1,5 +1,38 @@
 # Benchmarks
 
+## TL;DR
+
+Same read model - `id`, `email`, a nested `subscription.plan`, an existence check
+and a count - fetched three ways. PostgreSQL 17, 50k users, indexed schema:
+
+| rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
+| ---: | ---: | ---: | ---: |
+| 1 | 5 SQL / 0.47 ms | - | **1 SQL / 0.23 ms** |
+| 10 | 49 SQL / 4.96 ms | 5 SQL / 0.76 ms | **1 SQL / 0.34 ms** |
+| 100 | 481 SQL / 48.3 ms | 5 SQL / 2.83 ms | **1 SQL / 0.97 ms** |
+| 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
+| 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
+
+- **2-3x faster than careful hand-written ActiveRecord**, which needs 5
+  statements and ~25 lines to avoid the N+1. **15-55x faster** than the N+1.
+- **1 statement, always.** Over a networked database that is worth another
+  `(statements - 1) x round_trip` per request: ~6 ms saved per 100-row page at a
+  1 ms round trip, ~500 ms against an N+1.
+- **Same story on SQLite** (2.6-2.7x on lists) where round trips are free, so the
+  win is not only latency - it is also the ActiveRecord object machinery Pluckr
+  skips.
+- **Correlated nodes cost per returned row, not per stored row**: a page of 100
+  costs the same at 5k users as at 50k. Server-side time for a page of 10 is
+  0.039 ms.
+- **Index your foreign keys.** Without an index on `videos.user_id` the same page
+  of 100 goes from 1.44 ms to 177 ms.
+- Where it does not help: unbounded fetches of whole tables, dashboards whose
+  cost is `COUNT(*)` scans, and anything whose real problem is a missing index.
+
+Everything below is reproducible with `bundle exec ruby benchmarks/read_models.rb`.
+
+## Where the numbers come from
+
 Everything here comes from [`benchmarks/read_models.rb`](benchmarks/read_models.rb),
 which seeds a database, runs the same read model three ways at four page sizes,
 checks that all three return identical data, and prints `EXPLAIN ANALYZE` for the
