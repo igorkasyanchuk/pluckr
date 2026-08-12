@@ -10,11 +10,11 @@ check and a count:
 
 | rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
 | ---: | ---: | ---: | ---: |
-| 1 | 5 SQL / 0.47 ms | - | **1 SQL / 0.23 ms** |
-| 10 | 49 SQL / 4.96 ms | 5 SQL / 0.76 ms | **1 SQL / 0.34 ms** |
-| 100 | 481 SQL / 48.3 ms | 5 SQL / 2.83 ms | **1 SQL / 0.97 ms** |
-| 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
-| 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
+| 1 | 5 SQL / 0.46 ms | - | **1 SQL / 0.25 ms** |
+| 10 | 49 SQL / 4.95 ms | 5 SQL / 0.82 ms | **1 SQL / 0.35 ms** |
+| 100 | 481 SQL / 49.0 ms | 5 SQL / 2.90 ms | **1 SQL / 0.99 ms** |
+| 1,000 | 4,801 SQL / 493 ms | 5 SQL / 23.3 ms | **1 SQL / 11.7 ms** |
+| 10,000 | 48,001 SQL / 4,872 ms | 5 SQL / 286 ms | **1 SQL / 98.5 ms** |
 
 **`UserCard`** - the wide version: 3 fields with aliases, a nested
 `subscription.plan`, a self-referential `manager`, an existence check, three
@@ -22,10 +22,10 @@ counts (one of them scoped) and a sum:
 
 | rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
 | ---: | ---: | ---: | ---: |
-| 10 | 89 SQL / 10.0 ms | 10 SQL / 1.72 ms | **1 SQL / 0.82 ms** |
-| 100 | 881 SQL / 98.6 ms | 10 SQL / 6.22 ms | **1 SQL / 2.51 ms** |
-| 1,000 | 8,801 SQL / 1,023 ms | 10 SQL / 64.7 ms | **1 SQL / 28.6 ms** |
-| 10,000 | 88,001 SQL / 10,556 ms | 10 SQL / 597 ms | **1 SQL / 224 ms** |
+| 10 | 89 SQL / 10.2 ms | 10 SQL / 1.77 ms | **1 SQL / 0.83 ms** |
+| 100 | 881 SQL / 99.2 ms | 10 SQL / 6.15 ms | **1 SQL / 2.61 ms** |
+| 1,000 | 8,801 SQL / 1,037 ms | 10 SQL / 68.9 ms | **1 SQL / 27.6 ms** |
+| 10,000 | 88,001 SQL / 10,323 ms | 10 SQL / 588 ms | **1 SQL / 235 ms** |
 
 - **2-3x faster than careful hand-written ActiveRecord**, which needs 5
   statements (10 for the wide card) and ~25-40 lines to avoid the N+1.
@@ -110,37 +110,37 @@ adapter: PostgreSQL  users: 50000  pages: 10, 100, 1000, 10000  runs: 25
 | | rows | SQL | median ms | allocations | vs Pluckr |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | **Single record** | | | | | |
-| ActiveRecord, record + questions | 1 | 5 | 0.585 | 680 | 2.1x |
-| Pluckr | 1 | 1 | 0.273 | 393 | 1.0x |
+| ActiveRecord, record + questions | 1 | 5 | 0.464 | 680 | 1.8x |
+| Pluckr | 1 | 1 | 0.253 | 433 | 1.0x |
 | **List** | | | | | |
-| ActiveRecord, N+1 | 10 | 49 | 5.077 | 6,555 | 14.4x |
-| ActiveRecord, preloaded + grouped | 10 | 5 | 0.856 | 1,325 | 2.4x |
-| Pluckr | 10 | 1 | 0.353 | 891 | 1.0x |
-| ActiveRecord, N+1 | 100 | 481 | 48.400 | 64,246 | 49.8x |
-| ActiveRecord, preloaded + grouped | 100 | 5 | 2.860 | 4,982 | 2.9x |
-| Pluckr | 100 | 1 | 0.972 | 5,734 | 1.0x |
-| ActiveRecord, N+1 | 1,000 | 4,801 | 493.271 | 641,146 | 40.8x |
-| ActiveRecord, preloaded + grouped | 1,000 | 5 | 24.422 | 41,528 | 2.0x |
-| Pluckr | 1,000 | 1 | 12.096 | 54,154 | 1.0x |
-| ActiveRecord, N+1 | 10,000 | 48,001 | 4992.790 | 6,410,146 | 52.2x |
-| ActiveRecord, preloaded + grouped | 10,000 | 5 | 300.175 | 406,928 | 3.1x |
-| Pluckr | 10,000 | 1 | 95.562 | 538,354 | 1.0x |
+| ActiveRecord, N+1 | 10 | 49 | 4.951 | 6,555 | 14.3x |
+| ActiveRecord, preloaded + grouped | 10 | 5 | 0.816 | 1,325 | 2.4x |
+| Pluckr | 10 | 1 | 0.347 | 907 | 1.0x |
+| ActiveRecord, N+1 | 100 | 481 | 49.022 | 64,246 | 49.6x |
+| ActiveRecord, preloaded + grouped | 100 | 5 | 2.896 | 4,982 | 2.9x |
+| Pluckr | 100 | 1 | 0.988 | 5,750 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 4,801 | 493.261 | 641,146 | 42.3x |
+| ActiveRecord, preloaded + grouped | 1,000 | 5 | 23.313 | 41,528 | 2.0x |
+| Pluckr | 1,000 | 1 | 11.672 | 54,170 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 48,001 | 4871.963 | 6,410,146 | 49.5x |
+| ActiveRecord, preloaded + grouped | 10,000 | 5 | 286.453 | 406,928 | 2.9x |
+| Pluckr | 10,000 | 1 | 98.479 | 538,370 | 1.0x |
 | **Wide card (`UserCard`)** | | | | | |
-| ActiveRecord, N+1 | 10 | 89 | 10.034 | 13,655 | 12.3x |
-| ActiveRecord, preloaded + grouped | 10 | 10 | 1.718 | 2,918 | 2.1x |
-| Pluckr | 10 | 1 | 0.819 | 1,782 | 1.0x |
-| ActiveRecord, N+1 | 100 | 881 | 98.593 | 135,246 | 39.3x |
-| ActiveRecord, preloaded + grouped | 100 | 10 | 6.217 | 12,609 | 2.5x |
-| Pluckr | 100 | 1 | 2.506 | 10,225 | 1.0x |
-| ActiveRecord, N+1 | 1,000 | 8,801 | 1022.827 | 1,351,146 | 35.7x |
-| ActiveRecord, preloaded + grouped | 1,000 | 10 | 64.679 | 109,465 | 2.3x |
-| Pluckr | 1,000 | 1 | 28.626 | 94,645 | 1.0x |
-| ActiveRecord, N+1 | 10,000 | 88,001 | 10555.736 | 13,510,199 | 47.2x |
-| ActiveRecord, preloaded + grouped | 10,000 | 10 | 597.012 | 1,077,865 | 2.7x |
-| Pluckr | 10,000 | 1 | 223.615 | 938,845 | 1.0x |
+| ActiveRecord, N+1 | 10 | 89 | 10.239 | 13,655 | 12.3x |
+| ActiveRecord, preloaded + grouped | 10 | 10 | 1.773 | 2,918 | 2.1x |
+| Pluckr | 10 | 1 | 0.831 | 1,806 | 1.0x |
+| ActiveRecord, N+1 | 100 | 881 | 99.205 | 135,246 | 38.1x |
+| ActiveRecord, preloaded + grouped | 100 | 10 | 6.147 | 12,609 | 2.4x |
+| Pluckr | 100 | 1 | 2.605 | 10,249 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 8,801 | 1036.559 | 1,351,146 | 37.5x |
+| ActiveRecord, preloaded + grouped | 1,000 | 10 | 68.931 | 109,465 | 2.5x |
+| Pluckr | 1,000 | 1 | 27.636 | 94,669 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 88,001 | 10323.441 | 13,510,146 | 44.0x |
+| ActiveRecord, preloaded + grouped | 10,000 | 10 | 588.057 | 1,077,865 | 2.5x |
+| Pluckr | 10,000 | 1 | 234.668 | 938,869 | 1.0x |
 | **Dashboard, 3 counts** | | | | | |
-| ActiveRecord, three counts | 1 | 3 | 2.453 | 262 | 1.2x |
-| Pluckr | 1 | 1 | 1.986 | 278 | 1.0x |
+| ActiveRecord, three counts | 1 | 3 | 2.570 | 262 | 1.3x |
+| Pluckr | 1 | 1 | 2.009 | 293 | 1.0x |
 
 ## SQLite
 
@@ -151,36 +151,36 @@ adapter: SQLite  users: 50000  pages: 10, 100, 1000, 10000  runs: 25
 | | rows | SQL | median ms | allocations | vs Pluckr |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | **Single record** | | | | | |
-| ActiveRecord, record + questions | 1 | 5 | 0.375 | 667 | 2.1x |
-| Pluckr | 1 | 1 | 0.176 | 398 | 1.0x |
+| ActiveRecord, record + questions | 1 | 5 | 0.368 | 667 | 2.1x |
+| Pluckr | 1 | 1 | 0.174 | 438 | 1.0x |
 | **List** | | | | | |
-| ActiveRecord, N+1 | 10 | 49 | 3.876 | 6,422 | 17.2x |
-| ActiveRecord, preloaded + grouped | 10 | 5 | 0.634 | 1,305 | 2.8x |
-| Pluckr | 10 | 1 | 0.225 | 887 | 1.0x |
-| ActiveRecord, N+1 | 100 | 481 | 37.358 | 63,033 | 45.4x |
-| ActiveRecord, preloaded + grouped | 100 | 5 | 2.192 | 4,329 | 2.7x |
-| Pluckr | 100 | 1 | 0.823 | 5,639 | 1.0x |
-| ActiveRecord, N+1 | 1,000 | 4,801 | 387.649 | 629,139 | 54.9x |
-| ActiveRecord, preloaded + grouped | 1,000 | 5 | 18.081 | 37,608 | 2.6x |
-| Pluckr | 1,000 | 1 | 7.062 | 53,159 | 1.0x |
-| ActiveRecord, N+1 | 10,000 | 48,001 | 3751.680 | 6,290,149 | 50.8x |
-| ActiveRecord, preloaded + grouped | 10,000 | 5 | 191.899 | 367,008 | 2.6x |
-| Pluckr | 10,000 | 1 | 73.871 | 528,359 | 1.0x |
+| ActiveRecord, N+1 | 10 | 49 | 3.649 | 6,422 | 16.1x |
+| ActiveRecord, preloaded + grouped | 10 | 5 | 0.604 | 1,305 | 2.7x |
+| Pluckr | 10 | 1 | 0.227 | 903 | 1.0x |
+| ActiveRecord, N+1 | 100 | 481 | 35.829 | 63,033 | 44.0x |
+| ActiveRecord, preloaded + grouped | 100 | 5 | 2.163 | 4,329 | 2.7x |
+| Pluckr | 100 | 1 | 0.815 | 5,659 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 4,801 | 375.093 | 629,139 | 49.3x |
+| ActiveRecord, preloaded + grouped | 1,000 | 5 | 18.276 | 37,608 | 2.4x |
+| Pluckr | 1,000 | 1 | 7.612 | 53,175 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 48,001 | 3690.561 | 6,290,153 | 50.4x |
+| ActiveRecord, preloaded + grouped | 10,000 | 5 | 193.196 | 367,008 | 2.6x |
+| Pluckr | 10,000 | 1 | 73.211 | 528,375 | 1.0x |
 | **Wide card (`UserCard`)** | | | | | |
-| ActiveRecord, N+1 | 10 | 89 | 8.200 | 13,662 | 14.8x |
-| ActiveRecord, preloaded + grouped | 10 | 10 | 1.298 | 2,882 | 2.3x |
-| Pluckr | 10 | 1 | 0.553 | 1,775 | 1.0x |
-| ActiveRecord, N+1 | 100 | 881 | 75.075 | 135,433 | 44.3x |
-| ActiveRecord, preloaded + grouped | 100 | 10 | 4.448 | 11,036 | 2.6x |
-| Pluckr | 100 | 1 | 1.696 | 10,127 | 1.0x |
-| ActiveRecord, N+1 | 1,000 | 8,801 | 1363.709 | 1,353,138 | 86.6x |
-| ActiveRecord, preloaded + grouped | 1,000 | 10 | 38.653 | 100,701 | 2.5x |
-| Pluckr | 1,000 | 1 | 15.743 | 93,647 | 1.0x |
-| ActiveRecord, N+1 | 10,000 | 88,001 | 8115.795 | 13,530,195 | 49.3x |
-| ActiveRecord, preloaded + grouped | 10,000 | 10 | 426.893 | 988,101 | 2.6x |
-| Pluckr | 10,000 | 1 | 164.499 | 928,847 | 1.0x |
+| ActiveRecord, N+1 | 10 | 89 | 8.047 | 13,662 | 14.4x |
+| ActiveRecord, preloaded + grouped | 10 | 10 | 1.344 | 2,882 | 2.4x |
+| Pluckr | 10 | 1 | 0.560 | 1,799 | 1.0x |
+| ActiveRecord, N+1 | 100 | 881 | 73.868 | 135,432 | 42.4x |
+| ActiveRecord, preloaded + grouped | 100 | 10 | 4.675 | 11,036 | 2.7x |
+| Pluckr | 100 | 1 | 1.742 | 10,151 | 1.0x |
+| ActiveRecord, N+1 | 1,000 | 8,801 | 813.129 | 1,353,138 | 54.8x |
+| ActiveRecord, preloaded + grouped | 1,000 | 10 | 39.918 | 100,701 | 2.7x |
+| Pluckr | 1,000 | 1 | 14.837 | 93,671 | 1.0x |
+| ActiveRecord, N+1 | 10,000 | 88,001 | 8029.970 | 13,530,144 | 45.9x |
+| ActiveRecord, preloaded + grouped | 10,000 | 10 | 422.320 | 988,101 | 2.4x |
+| Pluckr | 10,000 | 1 | 174.790 | 928,871 | 1.0x |
 | **Dashboard, 3 counts** | | | | | |
-| ActiveRecord, three counts | 1 | 3 | 0.136 | 271 | 1.1x |
+| ActiveRecord, three counts | 1 | 3 | 0.136 | 271 | 1.0x |
 | Pluckr | 1 | 1 | 0.128 | 276 | 1.0x |
 
 SQLite is in the same process, so its round trips are nearly free - and Pluckr
@@ -334,11 +334,11 @@ From the tables above, PostgreSQL, per returned row:
 
 | rows | median ms | µs per row |
 | ---: | ---: | ---: |
-| 1 | 0.227 | - |
-| 10 | 0.342 | ~34 |
-| 100 | 0.972 | ~10 |
-| 1,000 | 12.216 | ~12 |
-| 10,000 | 98.357 | ~10 |
+| 1 | 0.253 | - |
+| 10 | 0.347 | ~35 |
+| 100 | 0.988 | ~10 |
+| 1,000 | 11.672 | ~12 |
+| 10,000 | 98.479 | ~10 |
 
 Linear in rows returned past a ~0.2 ms floor, and flat in table size: a page of
 100 costs the same at 5k users as at 50k. Correlated nodes cost per *returned*

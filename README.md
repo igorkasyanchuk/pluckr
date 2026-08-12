@@ -69,10 +69,10 @@ associations and four aggregates):
 
 | rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
 | ---: | ---: | ---: | ---: |
-| 10 | 49 SQL / 4.96 ms | 5 SQL / 0.76 ms | **1 SQL / 0.34 ms** |
-| 100 | 481 SQL / 48.3 ms | 5 SQL / 2.83 ms | **1 SQL / 0.97 ms** |
-| 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
-| 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
+| 10 | 49 SQL / 4.95 ms | 5 SQL / 0.82 ms | **1 SQL / 0.35 ms** |
+| 100 | 481 SQL / 49.0 ms | 5 SQL / 2.90 ms | **1 SQL / 0.99 ms** |
+| 1,000 | 4,801 SQL / 493 ms | 5 SQL / 23.3 ms | **1 SQL / 11.7 ms** |
+| 10,000 | 48,001 SQL / 4,872 ms | 5 SQL / 286 ms | **1 SQL / 98.5 ms** |
 
 2-3x faster than careful hand-written ActiveRecord, 12-55x faster than a
 forgotten preload, and the gap grows with every millisecond of network latency
@@ -105,6 +105,11 @@ UserSummary.where(active: true).to_sql
 passes them through to the root relation and adds its projections on top. Every
 chain is immutable, nothing runs until `fetch`/`find`/`first`, and every
 execution is exactly one statement no matter how many nodes the schema has.
+`first` orders by the primary key when the chain has no order of its own, like
+ActiveRecord does.
+
+Subclassing a query inherits its `source` and `schema`; the subclass can declare
+its own `schema` to replace them.
 
 ## Dashboards
 
@@ -169,6 +174,9 @@ association scopes, `has_many :through`, polymorphic and STI conditions,
 `joins`, `merge`, `distinct`, `group`, `limit`. The associations the schema DSL
 refuses to compile all work here, because Pluckr is not deriving the join - it
 is reading the relation's own `to_sql`.
+
+A grouped relation returns one row per group, so only `count` and `exists` are
+meaningful over it; asking for a `sum` of groups raises rather than guessing.
 
 `count`, `sum`, `avg` (alias `average`), `min`, `max` and `exists` are
 available; `as:` is always required. A model class works where a relation does (`b.count User, as: :users`).
@@ -391,8 +399,10 @@ count :x, scope: {}    # Pluckr::ConfigurationError: `scope:` expects a callable
 ```
 
 The rest raise on first compilation, where the context exists to detect them: a
-`scope:` returning the wrong model, `limit`/`offset`/`group` inside a scope, and
-output aliases longer than the database's identifier limit.
+`scope:` returning the wrong model, a `where:` callable returning something that
+is not a Hash or naming an unknown column, `limit`/`offset`/`group` inside a
+scope, output aliases longer than the database's identifier limit, and a query
+whose models do not share a database connection.
 
 ## How it works
 
@@ -406,7 +416,8 @@ DSL -> schema AST -> reflection -> SQL compiler -> flat row -> result object
 | `reflection/association.rb` | the only place that touches AR reflection |
 | `compiler/sql.rb` | AST + Arel -> one SQL statement |
 | `relation.rb` | chaining, delegates root filtering to AR |
-| `result/builder.rb` | flat row -> nested frozen objects |
+| `batch.rb` | `Pluckr.batch` - aggregates over caller-supplied relations |
+| `result/builder.rb` | flat row -> nested frozen objects, with type casting |
 
 The compiler never sees DSL state, so new node types are additive.
 
@@ -419,6 +430,9 @@ The compiler never sees DSL state, so new node types are additive.
   `Pluckr::UnsupportedAssociation` rather than silently ignoring the scope).
   Polymorphic `has_many ..., as:` targets and STI children *are* supported, and
   `Pluckr.batch` handles all of them, since ActiveRecord builds the SQL.
+- `where:`/`scope:` on `first`/`last`
+- composite primary keys are readable, and `first` orders by every key column,
+  but `find` needs a single-column key and says so
 - writes, serializers, pagination beyond `limit`/`offset`, caching
 
 ## What Pluckr is not
