@@ -148,6 +148,58 @@ RSpec.describe "schema validation" do
     expect { Bad.to_sql }.to raise_error(Pluckr::ConfigurationError, /has no `schema` block/)
   end
 
+  it "inherits source and schema from the query it subclasses" do
+    user = User.create!(email: "user@example.com")
+
+    define_query("UserSummary") do
+      source User
+
+      schema do
+        field :id
+        field :email
+      end
+    end
+    stub_const("AdminSummary", Class.new(UserSummary))
+
+    expect(AdminSummary.source_model).to eq(User)
+    expect(AdminSummary.find(user.id).email).to eq("user@example.com")
+    expect(AdminSummary.to_sql).to eq(UserSummary.to_sql)
+  end
+
+  it "lets a subclass declare its own schema" do
+    user = User.create!(email: "user@example.com")
+
+    define_query("UserSummary") do
+      source User
+
+      schema { field :email }
+    end
+    stub_const("AdminSummary", Class.new(UserSummary) do
+      schema do
+        field :id
+        count :videos
+      end
+    end)
+
+    expect(AdminSummary.find(user.id).to_h).to eq(id: user.id, videos_count: 0)
+    expect(UserSummary.find(user.id).to_h).to eq(email: "user@example.com")
+  end
+
+  it "rejects reading two databases in one statement" do
+    stub_const("Elsewhere", Class.new(ActiveRecord::Base) { self.table_name = "accounts" })
+    allow(Elsewhere).to receive(:connection_pool).and_return(Object.new)
+
+    define_query("Bad") do
+      schema do
+        count :here, from: User
+        count :there, from: Elsewhere
+      end
+    end
+
+    expect { Bad.to_sql }
+      .to raise_error(Pluckr::ConfigurationError, /different database connections/)
+  end
+
   it "rejects associations Pluckr cannot compile yet" do
     stub_const("Taggable", Class.new(ActiveRecord::Base) do
       self.table_name = "users"

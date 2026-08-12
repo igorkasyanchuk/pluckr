@@ -27,6 +27,7 @@ module Pluckr
       # Compiled fresh every time: `scope:` callables may depend on runtime state
       # and the compiler must stay free of shared mutable state.
       def apply(relation)
+        validate_connections!
         build = Build.new
         walk(build, schema, [], source_model.arel_table)
 
@@ -35,6 +36,8 @@ module Pluckr
 
       # Single-statement SQL for aggregate-only (dashboard and batch) queries.
       def aggregate_only_sql
+        validate_connections!
+
         parts = schema.nodes.map.with_index(1) do |node, index|
           "#{scalar_subquery(node, index)} AS #{quote_alias(node.output)}"
         end
@@ -46,7 +49,26 @@ module Pluckr
         connection_model.connection
       end
 
+      # A single statement cannot span two databases. Relation-rooted nodes are
+      # checked when they are added, in Pluckr::Batch.
+      def validate_connections!
+        models = ([source_model] + independent_models).compact.uniq
+        return if models.size < 2
+
+        pool = models.first.connection_pool
+        offender = models.find { |model| model.connection_pool != pool }
+        return unless offender
+
+        raise ConfigurationError,
+              "#{offender.name} and #{models.first.name} use different database connections, " \
+              "so they cannot be read in one statement"
+      end
+
       private
+
+      def independent_models
+        schema.nodes.grep(Schema::Aggregate).select(&:independent?).reject(&:relation).map(&:model)
+      end
 
       # Accumulator for one compilation pass.
       class Build

@@ -468,6 +468,29 @@ RSpec.describe "source-rooted queries" do
       expect(results).to all(be_a(Pluckr::Result::Object))
     end
 
+    it "orders first by primary key, like ActiveRecord" do
+      expect(UserSummary.first.id).to eq(User.first.id)
+      expect(UserSummary.first.id).to eq(user.id)
+      expect(UserSummary.order(id: :desc).first.id).to eq(other.id) # an explicit order wins
+    end
+
+    it "qualifies that order, so joins cannot make it ambiguous" do
+      define_query("UserWithSubscription") do
+        source User
+
+        schema do
+          field :id
+
+          one :subscription do
+            field :id
+          end
+        end
+      end
+
+      expect(UserWithSubscription.first.id).to eq(user.id)
+      expect(UserWithSubscription.all.to_sql).not_to include("ORDER BY")
+    end
+
     it "finds by primary key" do
       expect(UserSummary.find(user.id).email).to eq("user@example.com")
     end

@@ -34,12 +34,14 @@ module Pluckr
         @pluckr_schema
       end
 
+      # Declared on this class, or inherited from the query it subclasses.
       def source_model
-        @source_model
+        @source_model || inherited_from_query(:source_model)
       end
 
       def pluckr_schema
-        @pluckr_schema || raise(ConfigurationError, "#{name} has no `schema` block")
+        @pluckr_schema || inherited_from_query(:pluckr_schema) ||
+          raise(ConfigurationError, "#{name} has no `schema` block")
       end
 
       # Source-rooted queries return rows; aggregate-only queries return one object.
@@ -98,6 +100,12 @@ module Pluckr
       end
 
       private
+
+      def inherited_from_query(reader)
+        return nil unless superclass.respond_to?(reader) && superclass <= Query && superclass != Query
+
+        superclass.public_send(reader)
+      end
 
       def fetch_aggregates
         row = compiler.connection.select_all(to_sql, "#{name} Pluckr").first

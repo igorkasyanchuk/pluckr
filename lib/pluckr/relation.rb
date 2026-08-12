@@ -52,8 +52,13 @@ module Pluckr
       fetch.each(&block)
     end
 
+    # ActiveRecord orders by primary key when the relation has no order of its
+    # own, so that `first` means something. Same here.
     def first
-      limit(1).fetch.first
+      # Qualified, because `one` nodes join tables that have an `id` too.
+      ordered = relation.order_values.empty? ? order(model.arel_table[model.primary_key].asc) : self
+
+      ordered.limit(1).fetch.first
     end
 
     def first!

@@ -23,6 +23,10 @@
   `default_scope`d associations.
 - Result objects serialise as their data: `as_json`, `to_json` and `to_hash`, so
   `render json: result` no longer emits `{"attributes": {...}}`.
+- Query subclasses inherit `source` and `schema` from the query they subclass.
+- `first` orders by primary key when the relation has no order, like ActiveRecord.
+- Reading two connection pools in one statement raises instead of producing a
+  confusing SQL error.
 - `order:` directions are case-insensitive; `:ASC` used to reach Arel unchanged.
 - `first`/`last` select one row of a collection (`last :comment, via: :comments,
   order: :created_at do ... end`), compiled as one correlated `LIMIT 1` subquery

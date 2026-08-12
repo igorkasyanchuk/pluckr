@@ -314,9 +314,9 @@ keep these blocks small, and index the foreign key with the ordering column
 
 In v0.1 a `first`/`last` block may only contain `field`s - anything needing a
 join of its own is rejected with a descriptive error - and it takes no `where:`
-or `scope:`. To pick the latest row of a *subset*, narrow the association
-itself, or wait for those options; `Pluckr.batch` can answer the aggregate side
-of the same question today.
+or `scope:`, so "the latest *published* comment" is not expressible yet. A
+scoped association (`has_many :published_comments, -> { ... }`) does not help:
+Pluckr refuses those, because it would silently drop the scope.
 
 On PostgreSQL each of these plans as an `Index Scan Backward … loops=<page size>`
 - one probe per row per column, no hashing - so the `LIMIT 1 OFFSET 0` fence
