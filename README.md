@@ -141,9 +141,24 @@ exists :recent_photos, via: :photos, scope: -> { Photo.where(created_at: 1.week.
 no arguments) and must return a relation for the same model. It runs on every
 compilation, so runtime values stay fresh. `where:` takes a plain hash.
 
-A scope narrows rows only. `limit`/`offset`/`group` inside one raise, and a
-scope that joins the very table being correlated to raises as well, because the
-correlation would silently bind to the joined copy.
+A scope narrows rows only: `limit`/`offset`/`group` inside one raise, since the
+subquery has to return exactly one value.
+
+Scoped correlated nodes read through a derived table, so a scope may join (or
+be) the very table it correlates to without capturing the correlation:
+
+```ruby
+count :active_photos, via: :photos, scope: ->(rel) { rel.joins(:user).where(users: { active: true }) }
+count :active_reports, via: :direct_reports, scope: ->(rel) { rel.where(active: true) }
+```
+
+```sql
+(SELECT COUNT(*)
+   FROM (SELECT "photos".* FROM "photos"
+           INNER JOIN "users" ON "users"."id" = "photos"."user_id"
+          WHERE "users"."active" = TRUE) "pluckr_sub_1"
+  WHERE "pluckr_sub_1"."user_id" = "users"."id")
+```
 
 `one` nests to any depth of singular associations:
 

@@ -110,7 +110,8 @@ module Pluckr
       # EXISTS (SELECT 1 FROM photos WHERE photos.user_id = users.id)
       def exists_expression(build, node, owner_table)
         if node.relation_scoped?
-          return Arel.sql("EXISTS (#{correlated_relation(node, owner_table, Arel.sql("1")).to_sql})")
+          subquery = correlated_subquery(build, node, owner_table) { Arel.sql("1") }
+          return Arel::Nodes::Exists.new(subquery.ast)
         end
 
         table = subquery_table(build, node.association)
@@ -125,8 +126,8 @@ module Pluckr
       # (SELECT COUNT(*) FROM videos WHERE videos.user_id = users.id)
       def correlated_aggregate(build, node, owner_table)
         if node.relation_scoped?
-          function = aggregate_function(node, node.association.klass.arel_table)
-          return Arel.sql("(#{correlated_relation(node, owner_table, function).to_sql})")
+          subquery = correlated_subquery(build, node, owner_table) { |table| aggregate_function(node, table) }
+          return Arel::Nodes::Grouping.new(subquery.ast)
         end
 
         table = subquery_table(build, node.association)
@@ -149,43 +150,26 @@ module Pluckr
         Arel.sql("(#{relation.to_sql})")
       end
 
-      # `where:`/`scope:` conditions are written against the model's real table,
-      # so this subquery cannot alias it. That is only a problem when the name it
-      # needs is already taken by the table it correlates to - directly, or
-      # through a table the scope joins in.
-      def correlated_relation(node, owner_table, projection)
+      # A scoped correlated subquery reads through a derived table:
+      #
+      #   (SELECT COUNT(*)
+      #      FROM (SELECT photos.* FROM photos INNER JOIN users ...) pluckr_sub_1
+      #     WHERE pluckr_sub_1.user_id = users.id)
+      #
+      # `where:`/`scope:` conditions name the model's real table, which may be the
+      # table being correlated to (a self-referential association) or one the scope
+      # joins in. Nesting them inside a derived table keeps those names in their own
+      # scope, so the correlation always binds to the outer row.
+      def correlated_subquery(build, node, owner_table)
         klass = node.association.klass
-        owner_name = table_name_of(owner_table)
+        inner = aggregate_relation(node, klass.all).select(klass.arel_table[Arel.star])
+        name = "#{Aliases::TABLE_PREFIX}_sub_#{build.next_sequence}"
+        derived = Arel::Table.new(name)
 
-        if klass.table_name == owner_name
-          raise ConfigurationError,
-                "`#{node.output}`: `where:`/`scope:` cannot be used here - #{klass.name} and the " \
-                "correlated row share table `#{owner_name}`, so the subquery cannot name both"
-        end
-
-        relation = aggregate_relation(node, klass.all)
-        reject_shadowed_correlation!(node, relation, owner_name)
-
-        relation.where(node.association.join_condition(klass.arel_table, owner_table))
-                .select(projection)
-      end
-
-      # A scope that joins the correlated table would bind the correlation to its
-      # own copy of it, silently returning the wrong numbers.
-      def reject_shadowed_correlation!(node, relation, owner_name)
-        return unless relation.arel.join_sources.any? { |join| references?(join.left, owner_name) }
-
-        raise ConfigurationError,
-              "`#{node.output}`: `scope:` joins `#{owner_name}`, which is also the correlated " \
-              "table - the correlation would bind to the joined copy instead of the outer row"
-      end
-
-      def references?(source, name)
-        source.respond_to?(:name) ? table_name_of(source) == name : source.to_s.match?(/\b#{Regexp.escape(name)}\b/)
-      end
-
-      def table_name_of(table)
-        table.respond_to?(:name) ? table.name.to_s : table.to_s
+        Arel::SelectManager.new
+                           .from(Arel.sql("(#{inner.to_sql}) #{connection.quote_table_name(name)}"))
+                           .project(yield(derived))
+                           .where(node.association.join_condition(derived, owner_table))
       end
 
       # Whatever the scope selects, orders or limits is meaningless (or invalid)

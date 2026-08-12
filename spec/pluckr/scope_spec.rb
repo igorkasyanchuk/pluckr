@@ -174,6 +174,70 @@ RSpec.describe "scope: and where: on aggregates" do
     end
   end
 
+  describe "scopes that name the correlated table" do
+    it "keeps the correlation when the scope joins that table" do
+      active = User.create!(email: "active@example.com", active: true)
+      inactive = User.create!(email: "inactive@example.com", active: false)
+      Photo.create!(user: active, url: "https://example.com/a.jpg")
+      Photo.create!(user: inactive, url: "https://example.com/b.jpg")
+      Photo.create!(user: inactive, url: "https://example.com/c.jpg")
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          field :email
+          count :photos, as: :active_photos, scope: ->(rel) { rel.joins(:user).where(users: { active: true }) }
+        end
+      end
+
+      expect(UserSummary.find(active.id).active_photos).to eq(1)
+      expect(UserSummary.find(inactive.id).active_photos).to eq(0)
+    end
+
+    it "scopes a self-referential association" do
+      boss = User.create!(email: "boss@example.com")
+      User.create!(email: "report-a@example.com", manager: boss, active: true)
+      User.create!(email: "report-b@example.com", manager: boss, active: false)
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          field :email
+          count :direct_reports, as: :active_reports, scope: ->(rel) { rel.where(active: true) }
+          exists :direct_reports, as: :leads_anyone, scope: ->(rel) { rel.where(active: true) }
+        end
+      end
+
+      result = UserSummary.find(boss.id)
+
+      expect(result.active_reports).to eq(1)
+      expect(result.leads_anyone).to be(true)
+      expect(UserSummary.find(user.id).active_reports).to eq(0)
+      expect(UserSummary.find(user.id).leads_anyone).to be(false)
+    end
+
+    it "stays a single statement across many rows" do
+      2.times { |i| User.create!(email: "u#{i}@example.com", manager: user) }
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          field :id
+          count :direct_reports, as: :reports, scope: ->(rel) { rel.where(active: true) }
+        end
+      end
+
+      results = nil
+      statements = SqlCounter.capture { results = UserSummary.order(:id).fetch }
+
+      expect(statements.size).to eq(1)
+      expect(results.map(&:reports)).to eq([2, 0, 0])
+    end
+  end
+
   describe "errors" do
     it "rejects a non-callable scope at definition time" do
       expect do
@@ -206,19 +270,6 @@ RSpec.describe "scope: and where: on aggregates" do
       expect { Bad.to_sql }.to raise_error(Pluckr::ConfigurationError, /must return an ActiveRecord::Relation/)
     end
 
-    it "rejects scope: when the association shares the correlated table" do
-      define_query("Bad") do
-        source User
-
-        schema do
-          count :direct_reports, scope: ->(rel) { rel.where(active: true) }
-        end
-      end
-
-      expect { Bad.to_sql }
-        .to raise_error(Pluckr::ConfigurationError, /share table `users`/)
-    end
-
     it "allows scope: on the same model once the owner is an aliased join" do
       boss = User.create!(email: "boss@example.com")
       user.update!(manager: boss)
@@ -236,19 +287,6 @@ RSpec.describe "scope: and where: on aggregates" do
       end
 
       expect(UserSummary.find(user.id).manager.active_reports).to eq(1)
-    end
-
-    it "rejects a scope that joins the correlated table" do
-      define_query("Bad") do
-        source User
-
-        schema do
-          count :photos, scope: ->(rel) { rel.joins(:user).where(users: { active: true }) }
-        end
-      end
-
-      expect { Bad.to_sql }
-        .to raise_error(Pluckr::ConfigurationError, /joins `users`.*correlated table/m)
     end
 
     it "rejects scopes that reshape the subquery into more or fewer than one value" do
