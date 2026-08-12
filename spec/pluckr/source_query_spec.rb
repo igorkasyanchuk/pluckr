@@ -290,13 +290,12 @@ RSpec.describe "source-rooted queries" do
       expect(UserSummary.find(user.id).photos_exists).to be(true)
     end
 
-    it "compiles to a correlated scalar probe, not a join" do
+    it "compiles to a correlated EXISTS, not a join" do
       sql = UserSummary.to_sql
 
       expect(sql).to include(
-        "COALESCE((SELECT #{connection.quoted_true} FROM #{aliased_table(:photos, :pluckr_sub_1)} " \
-        "WHERE #{col(:pluckr_sub_1, :user_id)} = #{col(:users, :id)} LIMIT 1), " \
-        "#{connection.quoted_false})"
+        "EXISTS (SELECT 1 FROM #{aliased_table(:photos, :pluckr_sub_1)} " \
+        "WHERE #{col(:pluckr_sub_1, :user_id)} = #{col(:users, :id)} LIMIT 1 OFFSET 0)"
       )
       expect(sql).not_to include("GROUP BY")
       expect(sql).not_to include("JOIN #{qt(:photos)}")

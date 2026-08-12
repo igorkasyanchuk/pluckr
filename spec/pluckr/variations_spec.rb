@@ -531,8 +531,8 @@ RSpec.describe "query variations" do
         schema { field :email }
       end
 
-      expect(UserEmails.to_sql).not_to include("COALESCE")
-      expect(UserSummary.to_sql).to include("COALESCE")
+      expect(UserEmails.to_sql).not_to include("EXISTS")
+      expect(UserSummary.to_sql).to include("EXISTS")
     end
 
     it "stays a single statement with many nodes" do

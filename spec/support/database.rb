@@ -67,6 +67,11 @@ module TestDatabase
         t.string :region_code          # points at a non-`id` primary key
         t.timestamps
       end
+      add_index :users, :email, unique: true
+      add_index :users, %i[active id]   # the paged list query
+      add_index :users, :created_at
+      add_index :users, :manager_id
+      add_index :users, :region_code
 
       # Custom (string) primary key.
       create_table :regions, primary_key: :code, id: :string, force: true do |t|
@@ -81,10 +86,11 @@ module TestDatabase
 
       # Single table inheritance.
       create_table :documents, force: true do |t|
-        t.references :user
+        t.references :user, index: false
         t.string :type
         t.string :title
       end
+      add_index :documents, %i[user_id type] # STI lookups carry the type
 
       create_table :plans, force: true do |t|
         t.references :vendor
@@ -97,14 +103,14 @@ module TestDatabase
       end
 
       create_table :subscriptions, force: true do |t|
-        t.references :user
+        t.references :user, index: { unique: true } # has_one
         t.references :plan
         t.string :name
       end
 
       # Custom foreign key on both sides of a singular association.
       create_table :profiles, force: true do |t|
-        t.bigint :owner_id
+        t.bigint :owner_id, index: { unique: true } # has_one with a custom key
         t.string :nickname
       end
 
@@ -117,6 +123,7 @@ module TestDatabase
         t.references :user
         t.integer :size
       end
+      add_index :videos, %i[user_id size] # filtered counts
 
       create_table :comments, force: true do |t|
         t.references :user
@@ -126,17 +133,20 @@ module TestDatabase
       create_table :accounts, force: true do |t|
         t.boolean :active, default: false, null: false
       end
+      add_index :accounts, :active
 
       # Polymorphic association target.
       create_table :likes, force: true do |t|
         t.bigint :likeable_id
         t.string :likeable_type
       end
+      add_index :likes, %i[likeable_type likeable_id]
 
       create_table :orders, force: true do |t|
         t.string :status
         t.integer :amount
       end
+      add_index :orders, %i[status amount]
     end
   end
 

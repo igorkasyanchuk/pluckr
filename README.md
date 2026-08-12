@@ -253,21 +253,23 @@ and admin tables, dashboards, reports, background-job payloads.
 
 ## Benchmarks
 
-One statement instead of five, on PostgreSQL with 50k users, for a list of 50
-records with a nested association, an existence check and a count:
+One statement instead of five. PostgreSQL, 50k users, a list of records with a
+nested association, an existence check and a count:
 
-| | SQL | median ms |
-| --- | ---: | ---: |
-| ActiveRecord, N+1 | 241 | 24.6 |
-| ActiveRecord, preloaded + grouped | 5 | 1.72 |
-| Pluckr | 1 | 0.76 |
+| rows | ActiveRecord N+1 | ActiveRecord preloaded + grouped | Pluckr |
+| ---: | ---: | ---: | ---: |
+| 10 | 49 SQL / 4.96 ms | 5 SQL / 0.76 ms | **1 SQL / 0.34 ms** |
+| 100 | 481 SQL / 48.3 ms | 5 SQL / 2.83 ms | **1 SQL / 0.97 ms** |
+| 1,000 | 4,801 SQL / 491 ms | 5 SQL / 23.2 ms | **1 SQL / 12.2 ms** |
+| 10,000 | 48,001 SQL / 5,410 ms | 5 SQL / 287 ms | **1 SQL / 98.4 ms** |
 
-[BENCHMARKS.md](BENCHMARKS.md) has the full results, the `EXPLAIN ANALYZE`
-plans, how the query scales with page size, what a missing foreign key index
-costs (46x), and what to expect once the database is a network hop away.
+[BENCHMARKS.md](BENCHMARKS.md) has the SQLite numbers too, the `EXPLAIN ANALYZE`
+plans, why `exists` carries an optimisation fence, what a missing foreign key
+index costs (123x), and what to expect once the database is a network hop away.
 
 ```bash
-bundle exec ruby benchmarks/read_models.rb
+bundle exec ruby benchmarks/read_models.rb            # PostgreSQL
+DB=sqlite bundle exec ruby benchmarks/read_models.rb  # SQLite
 ```
 
 ## Development

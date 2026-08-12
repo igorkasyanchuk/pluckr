@@ -5,7 +5,7 @@
 #   bundle exec ruby benchmarks/read_models.rb            # PostgreSQL (default)
 #   DB=sqlite bundle exec ruby benchmarks/read_models.rb  # SQLite, in memory
 #
-# Knobs: USERS (dataset size), PAGE (rows per list query), RUNS (samples).
+# Knobs: USERS (dataset size), PAGES (comma-separated page sizes), RUNS (samples).
 
 # PostgreSQL unless told otherwise: the numbers are meant to resemble production.
 ENV["DB"] ||= "postgres"
@@ -18,9 +18,19 @@ TestDatabase.connect!
 require "./spec/support/models"
 require "./spec/support/sql_counter"
 
-USERS = Integer(ENV.fetch("USERS", 5_000))
-PAGE  = Integer(ENV.fetch("PAGE", 50))
+USERS = Integer(ENV.fetch("USERS", 50_000))
+PAGES = ENV.fetch("PAGES", "10,100,1000,10000").split(",").map { |value| Integer(value) }
 RUNS  = Integer(ENV.fetch("RUNS", 25))
+
+# The N+1 variant issues 4 statements per row, so it gets fewer samples on the
+# big pages. Everything else keeps the full sample count.
+def runs_for(page, naive: false)
+  return 1 if naive && page >= 10_000
+  return [RUNS, 3].min if naive && page >= 1_000
+  return [RUNS, 5].min if page >= 1_000
+
+  RUNS
+end
 
 # ----------------------------------------------------------------- read models
 
@@ -108,8 +118,8 @@ def pluckr_single(id)
 end
 
 # A tuned hand-written version: preloads + grouped aggregates, no N+1.
-def ar_tuned_list
-  users = User.where(active: true).order(:id).limit(PAGE).includes(subscription: :plan).to_a
+def ar_tuned_list(page)
+  users = User.where(active: true).order(:id).limit(page).includes(subscription: :plan).to_a
   ids = users.map(&:id)
 
   with_photos = Photo.where(user_id: ids).distinct.pluck(:user_id).to_set
@@ -128,12 +138,12 @@ def ar_tuned_list
 end
 
 # The same list with an N+1, which is what a preload-less controller produces.
-def ar_naive_list
-  User.where(active: true).order(:id).limit(PAGE).map { |user| ar_naive_single(user.id) }
+def ar_naive_list(page)
+  User.where(active: true).order(:id).limit(page).map { |user| ar_naive_single(user.id) }
 end
 
-def pluckr_list
-  UserCard.where(active: true).order(:id).limit(PAGE).fetch.map(&:to_h)
+def pluckr_list(page)
+  UserCard.where(active: true).order(:id).limit(page).fetch.map(&:to_h)
 end
 
 def ar_dashboard
@@ -146,9 +156,9 @@ end
 
 # ------------------------------------------------------------------ the ruler
 
-Result = Struct.new(:label, :statements, :median_ms, :allocations, keyword_init: true)
+Result = Struct.new(:label, :rows, :statements, :median_ms, :allocations, :factor, keyword_init: true)
 
-def measure(label)
+def measure(label, rows: nil, runs: RUNS)
   yield # warm up the connection, the query cache and any lazy AR machinery
 
   statements = SqlCounter.capture { yield }.size
@@ -157,28 +167,31 @@ def measure(label)
   yield
   allocations = GC.stat(:total_allocated_objects) - before
 
-  timings = Array.new(RUNS) do
+  timings = Array.new(runs) do
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     yield
     (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1_000
   end.sort
 
-  Result.new(label: label, statements: statements, median_ms: timings[RUNS / 2], allocations: allocations)
+  Result.new(label: label, rows: rows, statements: statements,
+             median_ms: timings[runs / 2], allocations: allocations)
 end
 
-def report(title, results)
-  baseline = results.last
+HEADER = format("  %-36s %7s %8s %12s %14s %11s",
+                "", "rows", "SQL", "median ms", "allocations", "vs Pluckr")
 
-  puts "\n#{title}"
-  puts format("  %-34s %10s %12s %14s %9s", "", "SQL", "median ms", "allocations", "vs Pluckr")
+# Each group is compared against its own Pluckr row.
+def rows_for(results)
+  baseline = results.reverse.find { |result| result.label.start_with?("Pluckr") }
+  results.each { |result| result.factor = result.median_ms / baseline.median_ms }
+  results
+end
 
-  results.each do |result|
-    factor = result.median_ms / baseline.median_ms
-
-    puts format(
-      "  %-34s %10d %12.3f %14d %8.1fx",
-      result.label, result.statements, result.median_ms, result.allocations, factor
-    )
+def print_rows(results)
+  rows_for(results).each do |result|
+    puts format("  %-36s %7s %8d %12.3f %14d %10.1fx",
+                result.label, result.rows || "1", result.statements,
+                result.median_ms, result.allocations, result.factor)
   end
 end
 
@@ -200,10 +213,11 @@ def explain_all!(id)
   puts "\n" + ("=" * 78) + "\nEXPLAIN ANALYZE\n" + ("=" * 78)
 
   explain!("Pluckr, single record", UserCard.where(id: id).limit(1).to_sql)
-  explain!("Pluckr, list of #{PAGE}", UserCard.where(active: true).order(:id).limit(PAGE).to_sql)
+  explain!("Pluckr, list of #{PAGES.first}",
+           UserCard.where(active: true).order(:id).limit(PAGES.first).to_sql)
   explain!("ActiveRecord, the list query it replaces",
-           User.where(active: true).order(:id).limit(PAGE).to_sql)
-  page_ids = User.where(active: true).order(:id).limit(PAGE).pluck(:id)
+           User.where(active: true).order(:id).limit(PAGES.first).to_sql)
+  page_ids = User.where(active: true).order(:id).limit(PAGES.first).pluck(:id)
   explain!("ActiveRecord, the grouped count that goes with it",
            Video.where(user_id: page_ids).group(:user_id).select(:user_id, "COUNT(*)").to_sql)
   explain!("Pluckr, dashboard", DashboardStats.to_sql)
@@ -211,35 +225,49 @@ end
 
 # ------------------------------------------------------------------ the run
 
-puts "adapter: #{ActiveRecord::Base.connection.adapter_name}  users: #{USERS}  page: #{PAGE}  runs: #{RUNS}"
+puts "adapter: #{ActiveRecord::Base.connection.adapter_name}  users: #{USERS}  " \
+     "pages: #{PAGES.join(", ")}  runs: #{RUNS}"
 print "seeding... "
 seed!
 puts "done"
 
 id = USERS / 2
 
-report("Single record (id, email, subscription.name, subscription.plan.name, photos?, videos count)", [
-         measure("ActiveRecord, record + questions") { ar_naive_single(id) },
-         measure("Pluckr") { pluckr_single(id) }
-       ])
+puts "\nSingle record: id, email, subscription.name, subscription.plan.name, photos?, videos count"
+puts HEADER
+print_rows([
+             measure("ActiveRecord, record + questions") { ar_naive_single(id) },
+             measure("Pluckr") { pluckr_single(id) }
+           ])
 
-report("List of #{PAGE} records, same shape", [
-         measure("ActiveRecord, N+1") { ar_naive_list },
-         measure("ActiveRecord, preloaded + grouped") { ar_tuned_list },
-         measure("Pluckr") { pluckr_list }
-       ])
+puts "\nLists of the same shape"
+puts HEADER
+PAGES.each do |page|
+  print_rows([
+               measure("ActiveRecord, N+1", rows: page, runs: runs_for(page, naive: true)) do
+                 ar_naive_list(page)
+               end,
+               measure("ActiveRecord, preloaded + grouped", rows: page, runs: runs_for(page)) do
+                 ar_tuned_list(page)
+               end,
+               measure("Pluckr", rows: page, runs: runs_for(page)) { pluckr_list(page) }
+             ])
+  puts
+end
 
-report("Dashboard: 3 independent counts", [
-         measure("ActiveRecord, three counts") { ar_dashboard },
-         measure("Pluckr") { pluckr_dashboard }
-       ])
+puts "Dashboard: 3 independent counts"
+puts HEADER
+print_rows([
+             measure("ActiveRecord, three counts") { ar_dashboard },
+             measure("Pluckr") { pluckr_dashboard }
+           ])
 
 explain_all!(id)
 
 # Sanity: the alternatives must agree, or the numbers mean nothing.
 raise "single mismatch" unless ar_naive_single(id).values_at(:id, :videos_count) ==
                               pluckr_single(id).values_at(:id, :videos_count)
-raise "list mismatch" unless ar_tuned_list.map { |r| r[:id] } == pluckr_list.map { |r| r[:id] }
+raise "list mismatch" unless ar_tuned_list(100).map { |r| r[:id] } == pluckr_list(100).map { |r| r[:id] }
 raise "dashboard mismatch" unless ar_dashboard == pluckr_dashboard
 
 puts "\nresults verified identical across all three implementations"
