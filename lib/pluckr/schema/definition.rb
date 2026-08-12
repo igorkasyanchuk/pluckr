@@ -167,7 +167,8 @@ module Pluckr
       end
 
       def order_direction(direction, name, value)
-        return value.to_sym if %w[asc desc].include?(value.to_s.downcase)
+        normalized = value.to_s.downcase.to_sym
+        return normalized if %i[asc desc].include?(normalized)
 
         raise ConfigurationError,
               "`#{direction} :#{name}, order:` expects :asc or :desc, got #{value.inspect}"
@@ -242,7 +243,15 @@ module Pluckr
       # A Hash is checked now; a callable can only be checked when it runs, on
       # every compilation.
       def validate_where!(model, where)
-        return if where.nil? || where.respond_to?(:call)
+        return if where.nil?
+
+        if where.respond_to?(:call)
+          return if !where.respond_to?(:arity) || where.arity <= 0
+
+          raise ConfigurationError,
+                "a `where:` callable takes no arguments and returns a Hash - use `scope:` if you " \
+                "need the relation"
+        end
 
         unless where.is_a?(Hash)
           raise ConfigurationError,

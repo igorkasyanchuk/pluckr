@@ -211,7 +211,8 @@ exists :recent_photos, via: :photos, scope: -> { Photo.where(created_at: 1.week.
 no arguments) and must return a relation for the same model. It runs on every
 compilation, so runtime values stay fresh.
 
-`where:` takes a Hash **or** a callable returning one. The difference matters:
+`where:` takes a Hash **or** a zero-argument callable returning one (`scope:` is
+the one that receives the relation). The difference matters:
 
 ```ruby
 # evaluated once, when the class loads - this asks about the week before boot,
@@ -312,7 +313,14 @@ keep these blocks small, and index the foreign key with the ordering column
 (`add_index :comments, [:user_id, :created_at]`).
 
 In v0.1 a `first`/`last` block may only contain `field`s - anything needing a
-join of its own is rejected with a descriptive error.
+join of its own is rejected with a descriptive error - and it takes no `where:`
+or `scope:`. To pick the latest row of a *subset*, narrow the association
+itself, or wait for those options; `Pluckr.batch` can answer the aggregate side
+of the same question today.
+
+On PostgreSQL each of these plans as an `Index Scan Backward … loops=<page size>`
+- one probe per row per column, no hashing - so the `LIMIT 1 OFFSET 0` fence
+`exists` needs is not needed here.
 
 ### `one` requires a genuinely singular association
 

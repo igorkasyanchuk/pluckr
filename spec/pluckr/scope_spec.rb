@@ -348,6 +348,26 @@ RSpec.describe "scope: and where: on aggregates" do
       expect { Bad.to_sql }.to raise_error(Pluckr::UnknownField, "Video does not have column `nope`")
     end
 
+    it "rejects a where: callable that expects arguments" do
+      expect do
+        define_query("Bad") do
+          source User
+
+          schema { count :videos, where: ->(rel) { rel.where(size: 1..) } }
+        end
+      end.to raise_error(Pluckr::ConfigurationError, /takes no arguments.*use `scope:`/m)
+    end
+
+    it "accepts a callable with optional arguments" do
+      define_query("UserSummary") do
+        source User
+
+        schema { count :videos, where: ->(*) { { size: 100.. } } }
+      end
+
+      expect(UserSummary.find(user.id).videos_count).to eq(1)
+    end
+
     it "rejects a callable that does not return a Hash" do
       define_query("Bad") do
         source User

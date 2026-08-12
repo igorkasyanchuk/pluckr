@@ -23,6 +23,7 @@
   `default_scope`d associations.
 - Result objects serialise as their data: `as_json`, `to_json` and `to_hash`, so
   `render json: result` no longer emits `{"attributes": {...}}`.
+- `order:` directions are case-insensitive; `:ASC` used to reach Arel unchanged.
 - `first`/`last` select one row of a collection (`last :comment, via: :comments,
   order: :created_at do ... end`), compiled as one correlated `LIMIT 1` subquery
   per column, with the primary key as a tiebreaker so every column comes from the

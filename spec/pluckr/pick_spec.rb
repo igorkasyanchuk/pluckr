@@ -139,6 +139,27 @@ RSpec.describe "first and last" do
         .to eq(user.comments.order(body: :asc, created_at: :desc).first.body)
     end
 
+    it "normalises the direction, whatever case it is written in" do
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          first :earliest, via: :comments, order: { created_at: :ASC } do
+            field :body
+          end
+
+          last :latest, via: :comments, order: { created_at: "asc" } do
+            field :body
+          end
+        end
+      end
+
+      result = UserSummary.find(user.id)
+
+      expect(result.earliest.body).to eq("oldest")
+      expect(result.latest.body).to eq("newest")
+    end
+
     it "breaks ties on the primary key, so every column comes from one row" do
       tied_at = 1.hour.ago
       first_tie = Comment.create!(user: user, body: "tie-a", created_at: tied_at)

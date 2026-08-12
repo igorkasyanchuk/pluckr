@@ -75,6 +75,12 @@ RSpec.describe Pluckr::Result::Object do
       )
     end
 
+    it "passes to_json options through to as_json" do
+      expect(JSON.parse(result.to_json(only: [:id]))).to eq("id" => user.id)
+      expect(JSON.parse(result.to_json(except: [:subscription, :photos_exists, :videos_count])))
+        .to eq("id" => user.id, "email" => "user@example.com")
+    end
+
     it "round-trips through to_json, nested objects included" do
       expect(JSON.parse(result.to_json)).to eq(result.as_json)
       expect(result.to_json).not_to include("attributes")

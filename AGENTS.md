@@ -60,9 +60,12 @@ Aggregate node (with `relation:` instead of `model:`), the compiler's
   the primary key so every column comes from the same row, and `last` inverts the
   requested order, matching `relation.order(...).last`
 - `count`/`sum`/`avg`/`min`/`max` -> scalar subquery, never JOIN + GROUP BY
-- `where:` is a Hash (validated at definition time) or a callable returning one
-  (invoked and validated on every compilation, so runtime values stay runtime
-  values) - see `schema/conditions.rb`
+- `where:` is a Hash (validated at definition time) or a zero-argument callable
+  returning one (invoked and validated on every compilation, so runtime values
+  stay runtime values) - see `schema/conditions.rb`. `scope:` is the callable
+  that receives the relation; a `where:` callable with arguments is rejected
+- `first`/`last` take no `where:`/`scope:` yet; adding them means routing the
+  picked subquery through a relation, like the correlated aggregates do
 - `where:`/`scope:` on a correlated node -> the scope is nested in a derived table
   and correlated from outside, so a scope may join (or be) the table it
   correlates to without capturing the correlation
@@ -82,7 +85,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-220 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+226 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
