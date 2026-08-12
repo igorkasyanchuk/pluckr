@@ -31,6 +31,10 @@ DB=mysql bundle exec rspec     # CI covers this one
 CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three adapters.
 Changes must pass on SQLite and PostgreSQL locally before pushing.
 
+Benchmarks live in `benchmarks/read_models.rb` (PostgreSQL by default); results
+and query plans are written up in `BENCHMARKS.md`. Re-run and update it when
+changing the SQL the compiler emits.
+
 ## Rules
 
 - Keep the layers separated. The compiler reads the AST only, never DSL state.

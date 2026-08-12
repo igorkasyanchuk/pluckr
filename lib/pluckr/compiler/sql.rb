@@ -107,20 +107,28 @@ module Pluckr
         build.projections << Arel::Nodes::As.new(expression, Arel.sql(quote_alias(output_alias)))
       end
 
-      # EXISTS (SELECT 1 FROM photos WHERE photos.user_id = users.id)
+      # COALESCE((SELECT TRUE FROM photos WHERE photos.user_id = users.id LIMIT 1), FALSE)
+      #
+      # Not `EXISTS (...)`: PostgreSQL hashes a correlated EXISTS in the SELECT
+      # list into one full scan of the child table, which dominates a paged query.
+      # A scalar subquery with LIMIT 1 stays an index probe that stops at the
+      # first match - benchmarks/ has the numbers.
       def exists_expression(build, node, owner_table)
-        if node.relation_scoped?
-          subquery = correlated_subquery(build, node, owner_table) { Arel.sql("1") }
-          return Arel::Nodes::Exists.new(subquery.ast)
-        end
+        subquery =
+          if node.relation_scoped?
+            correlated_subquery(build, node, owner_table) { Arel.sql(connection.quoted_true) }
+          else
+            table = subquery_table(build, node.association)
+            manager = Arel::SelectManager.new(table)
+                      .project(Arel.sql(connection.quoted_true))
+                      .where(node.association.join_condition(table, owner_table))
+            restrict_to_sti(manager, node.association.klass, table)
+          end
 
-        table = subquery_table(build, node.association)
-        subquery = Arel::SelectManager.new(table)
-                   .project(Arel.sql("1"))
-                   .where(node.association.join_condition(table, owner_table))
-        subquery = restrict_to_sti(subquery, node.association.klass, table)
-
-        Arel::Nodes::Exists.new(subquery.ast)
+        Arel::Nodes::NamedFunction.new(
+          "COALESCE",
+          [Arel::Nodes::Grouping.new(subquery.take(1).ast), Arel.sql(connection.quoted_false)]
+        )
       end
 
       # (SELECT COUNT(*) FROM videos WHERE videos.user_id = users.id)

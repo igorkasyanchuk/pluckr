@@ -251,6 +251,25 @@ Not an ORM, not a serializer, not GraphQL, not a replacement for ActiveRecord.
 Use it where loading full object graphs is wasted work: API read models, index
 and admin tables, dashboards, reports, background-job payloads.
 
+## Benchmarks
+
+One statement instead of five, on PostgreSQL with 50k users, for a list of 50
+records with a nested association, an existence check and a count:
+
+| | SQL | median ms |
+| --- | ---: | ---: |
+| ActiveRecord, N+1 | 241 | 24.6 |
+| ActiveRecord, preloaded + grouped | 5 | 1.72 |
+| Pluckr | 1 | 0.76 |
+
+[BENCHMARKS.md](BENCHMARKS.md) has the full results, the `EXPLAIN ANALYZE`
+plans, how the query scales with page size, what a missing foreign key index
+costs (46x), and what to expect once the database is a network hop away.
+
+```bash
+bundle exec ruby benchmarks/read_models.rb
+```
+
 ## Development
 
 ```bash
