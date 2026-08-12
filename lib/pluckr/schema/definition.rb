@@ -155,11 +155,15 @@ module Pluckr
         raise UnknownField, "#{model.name} does not have column `#{name}`"
       end
 
+      # A Hash is checked now; a callable can only be checked when it runs, on
+      # every compilation.
       def validate_where!(model, where)
-        return if where.nil?
+        return if where.nil? || where.respond_to?(:call)
 
         unless where.is_a?(Hash)
-          raise ConfigurationError, "`where:` expects a Hash of column => value, got #{where.inspect}"
+          raise ConfigurationError,
+                "`where:` expects a Hash of column => value or a callable returning one, " \
+                "got #{where.inspect}"
         end
 
         where.each_key { |key| validate_column!(model, key) }

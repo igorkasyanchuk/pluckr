@@ -42,6 +42,17 @@ module Pluckr
           value.is_a?(Object) ? value.to_h : value
         end
       end
+      alias to_hash to_h
+
+      # Without this, ActiveSupport serialises the object's ivars and
+      # `render json: result` emits {"attributes": {...}}.
+      def as_json(options = nil)
+        to_h.as_json(options)
+      end
+
+      def to_json(*args)
+        as_json.to_json(*args)
+      end
 
       def keys
         @attributes.keys

@@ -219,7 +219,9 @@ module Pluckr
 
       def narrow(node, relation)
         relation = apply_scope(node, relation)
-        node.where ? relation.where(node.where) : relation
+        conditions = node.resolved_where
+
+        conditions ? relation.where(conditions) : relation
       end
 
       def apply_scope(node, relation)

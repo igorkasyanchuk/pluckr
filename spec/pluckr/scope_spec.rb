@@ -238,6 +238,104 @@ RSpec.describe "scope: and where: on aggregates" do
     end
   end
 
+  describe "dynamic where:" do
+    before do
+      Video.create!(user: user, size: 50)
+      Video.create!(user: user, size: 500)
+    end
+
+    it "re-evaluates a callable on every compilation" do
+      threshold = 100
+
+      define_query("UserSummary") do
+        source User
+
+        schema do
+          field :id
+          count :videos, as: :big_videos, where: -> { { size: threshold.. } }
+        end
+      end
+
+      expect(UserSummary.find(user.id).big_videos).to eq(1)
+
+      threshold = 10
+
+      expect(UserSummary.find(user.id).big_videos).to eq(2)
+    end
+
+    it "works for independent aggregates too" do
+      status = "paid"
+      Order.create!(status: "paid", amount: 10)
+      Order.create!(status: "void", amount: 10)
+
+      define_query("OrderStats") do
+        schema { count :orders, from: Order, where: -> { { status: status } } }
+      end
+
+      expect(OrderStats.fetch.orders).to eq(1)
+
+      status = "void"
+
+      expect(OrderStats.fetch.orders).to eq(1)
+    end
+
+    it "works for exists" do
+      flag = 10_000
+
+      define_query("UserSummary") do
+        source User
+
+        schema { exists :videos, as: :has_huge, where: -> { { size: flag.. } } }
+      end
+
+      expect(UserSummary.find(user.id).has_huge).to be(false)
+
+      flag = 100
+
+      expect(UserSummary.find(user.id).has_huge).to be(true)
+    end
+
+    it "keeps quoting values" do
+      define_query("OrderStats") do
+        schema { count :orders, from: Order, where: -> { { status: "x' OR 1=1 --" } } }
+      end
+
+      expect(OrderStats.to_sql).to include(qv("x' OR 1=1 --"))
+      expect(OrderStats.fetch.orders).to eq(0)
+    end
+
+    it "validates the columns it returns, at compile time" do
+      define_query("Bad") do
+        source User
+
+        schema { count :videos, where: -> { { nope: 1 } } }
+      end
+
+      expect { Bad.to_sql }.to raise_error(Pluckr::UnknownField, "Video does not have column `nope`")
+    end
+
+    it "rejects a callable that does not return a Hash" do
+      define_query("Bad") do
+        source User
+
+        schema { count :videos, where: -> { "size > 1" } }
+      end
+
+      expect { Bad.to_sql }
+        .to raise_error(Pluckr::ConfigurationError, /a `where:` lambda must return a Hash/)
+    end
+
+    it "still checks a Hash at definition time" do
+      expect do
+        define_query("Bad") do
+          source User
+
+          schema { count :videos, where: { nope: 1 } }
+        end
+      end.to raise_error(Pluckr::UnknownField, "Video does not have column `nope`")
+    end
+  end
+
   describe "errors" do
     it "rejects a non-callable scope at definition time" do
       expect do

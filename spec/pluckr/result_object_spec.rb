@@ -64,6 +64,34 @@ RSpec.describe Pluckr::Result::Object do
     expect(result.inspect).not_to include("__pluckr")
   end
 
+  describe "JSON" do
+    it "serialises the data, not its internals" do
+      expect(result.as_json).to eq(
+        "id" => user.id,
+        "email" => "user@example.com",
+        "subscription" => { "id" => subscription.id, "name" => "Pro" },
+        "photos_exists" => true,
+        "videos_count" => 2
+      )
+    end
+
+    it "round-trips through to_json, nested objects included" do
+      expect(JSON.parse(result.to_json)).to eq(result.as_json)
+      expect(result.to_json).not_to include("attributes")
+    end
+
+    it "serialises a missing association as null" do
+      subscription.destroy!
+
+      expect(JSON.parse(UserSummary.find(user.id).to_json)["subscription"]).to be_nil
+    end
+  end
+
+  it "acts as a hash where one is expected" do
+    expect({ **result }).to eq(result.to_h)
+    expect(result.to_hash).to eq(result.to_h)
+  end
+
   it "supports [] access" do
     expect(result[:email]).to eq("user@example.com")
     expect(result["email"]).to eq("user@example.com")

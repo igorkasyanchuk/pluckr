@@ -21,4 +21,8 @@
   relations the caller already built, in one statement. Respects everything
   ActiveRecord applied, including `:through`, polymorphic, scoped and
   `default_scope`d associations.
+- Result objects serialise as their data: `as_json`, `to_json` and `to_hash`, so
+  `render json: result` no longer emits `{"attributes": {...}}`.
+- `where:` accepts a callable returning a Hash, evaluated on every compilation,
+  so `-> { { created_at: 1.week.ago.. } }` is not frozen at class-load time.
 - Benchmarks in `benchmarks/read_models.rb`, results in `BENCHMARKS.md`.

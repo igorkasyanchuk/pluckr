@@ -1,12 +1,14 @@
 # frozen_string_literal: true
 
 require "active_record"
+require "active_support/core_ext/object/json"
 
 require "pluckr/version"
 require "pluckr/errors"
 require "pluckr/aliases"
 require "pluckr/reflection/association"
 require "pluckr/schema/node"
+require "pluckr/schema/conditions"
 require "pluckr/schema/field"
 require "pluckr/schema/one"
 require "pluckr/schema/exists"

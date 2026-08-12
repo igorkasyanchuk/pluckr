@@ -17,10 +17,11 @@ lib/pluckr/
   schema/definition.rb       evaluates the DSL, validates, builds the AST
   schema/scope.rb            one level of the AST (the nodes selected for one model)
   schema/{field,one,exists,aggregate,node}.rb   AST nodes
+  schema/conditions.rb       shared `where:` handling (Hash or callable)
   reflection/association.rb  the only place that touches AR reflection
   compiler/sql.rb            AST + Arel -> one SQL statement
   result/builder.rb          flat row -> nested frozen objects, with type casting
-  result/object.rb           generated readers, to_h, inspect, ==
+  result/object.rb           generated readers, to_h/to_hash, as_json, inspect, ==
   aliases.rb                 SQL alias encoding, shared by compiler and builder
   errors.rb                  Pluckr::Error and its descendants
 ```
@@ -45,12 +46,18 @@ Aggregate node (with `relation:` instead of `model:`), the compiler's
 - plain fields -> selected columns, never `SELECT users.*`
 - `one` -> `LEFT OUTER JOIN` on an aliased table (`pluckr_<path>`), plus a hidden
   presence marker (`__pluckr.<path>.present`) selecting the association's primary
-  key, so "missing row" stays distinct from "row with NULL columns"
+  key, so "missing row" stays distinct from "row with NULL columns". This assumes
+  the association really is singular: a `has_one` with duplicate rows duplicates
+  the parent row. Documented as requiring a unique index; compiling `has_one` as
+  a subquery is the structural fix, deferred
 - `exists` -> `EXISTS (SELECT 1 ... LIMIT 1 OFFSET 0)`. The `OFFSET 0` is an
   optimisation fence; without it PostgreSQL rewrites the correlated EXISTS into a
   hashed subplan that scans the whole child table (50x slower on a paged query).
   Do not "clean it up".
 - `count`/`sum`/`min`/`max` -> scalar subquery, never JOIN + GROUP BY
+- `where:` is a Hash (validated at definition time) or a callable returning one
+  (invoked and validated on every compilation, so runtime values stay runtime
+  values) - see `schema/conditions.rb`
 - `where:`/`scope:` on a correlated node -> the scope is nested in a derived table
   and correlated from outside, so a scope may join (or be) the table it
   correlates to without capturing the correlation
@@ -70,7 +77,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-139 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+190 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema

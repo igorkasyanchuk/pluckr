@@ -10,6 +10,8 @@ module Pluckr
     # Both compile to a scalar subquery in the SELECT list, never to a JOIN +
     # GROUP BY, so root rows are never multiplied.
     class Aggregate < Node
+      include Conditions
+
       OPERATIONS = %i[count sum min max exists].freeze
 
       attr_reader :operation, :association, :model, :relation, :column, :where, :scope
@@ -26,7 +28,7 @@ module Pluckr
         @model = model
         @relation = relation
         @column = column&.to_sym
-        @where = where ? where.dup.freeze : nil
+        @where = where.respond_to?(:call) ? where : where&.dup&.freeze
         @scope = scope
         freeze
       end
@@ -45,6 +47,7 @@ module Pluckr
       def relation_scoped?
         !scope.nil? || !where.nil?
       end
+
 
       # Target model for column validation / table resolution.
       def target_model

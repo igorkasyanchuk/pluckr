@@ -205,7 +205,23 @@ exists :recent_photos, via: :photos, scope: -> { Photo.where(created_at: 1.week.
 
 `scope:` receives the target model's relation (or nothing, if the callable takes
 no arguments) and must return a relation for the same model. It runs on every
-compilation, so runtime values stay fresh. `where:` takes a plain hash.
+compilation, so runtime values stay fresh.
+
+`where:` takes a Hash **or** a callable returning one. The difference matters:
+
+```ruby
+# evaluated once, when the class loads - this asks about the week before boot,
+# forever
+count :recent_orders, from: Order, where: { created_at: 1.week.ago.. }
+
+# evaluated on every compilation - what you almost certainly meant
+count :recent_orders, from: Order, where: -> { { created_at: 1.week.ago.. } }
+```
+
+A Hash is validated against the model's columns when the class loads; a callable
+is validated each time it runs, so an unknown column raises `Pluckr::UnknownField`
+on the first `to_sql`/`fetch` instead. Either way values go through ActiveRecord
+quoting.
 
 A scope narrows rows only: `limit`/`offset`/`group` inside one raise, since the
 subquery has to return exactly one value.
@@ -252,6 +268,24 @@ PostgreSQL rewrites the subquery into a full scan of the child table, which
 costs 50x on a paged query. [BENCHMARKS.md](BENCHMARKS.md#why-exists-carries-limit-1-offset-0)
 has the measurements.
 
+### `one` requires a genuinely singular association
+
+`one` compiles to a `LEFT OUTER JOIN`, which is only safe while the association
+really is singular. If a `has_one` has two matching rows - no unique index, an
+import that ran twice - the join returns the parent row twice, so `fetch`
+returns duplicate result objects and `limit(20)` covers fewer than 20 records.
+
+ActiveRecord hides this (`user.subscription` just picks one row); SQL does not.
+Put a unique index on the association's foreign key:
+
+```ruby
+add_index :subscriptions, :user_id, unique: true   # has_one :subscription
+add_index :profiles, :owner_id, unique: true       # has_one :profile, foreign_key: :owner_id
+```
+
+`belongs_to` cannot duplicate - it points at a primary key. A future version may
+compile `has_one` as a subquery so the index stops being a requirement.
+
 ### Missing vs NULL
 
 Pluckr selects the association's primary key as a hidden presence marker, so
@@ -276,6 +310,14 @@ user.created_at    # NoMethodError - not selected
 
 Values are cast with the model's own column types, so `active` is `true` and
 not `1` on every adapter.
+
+They serialise as their data, so `render json:` does the obvious thing:
+
+```ruby
+result.to_json   # => {"id":1,"email":"...","subscription":{"name":"Pro"},"videos_count":2}
+result.as_json   # => {"id" => 1, ...}
+result.to_hash   # => {id: 1, ...}, so **result works too
+```
 
 ## Errors, early
 
