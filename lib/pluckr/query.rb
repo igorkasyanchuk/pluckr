@@ -83,6 +83,15 @@ module Pluckr
         all.find(id)
       end
 
+      # Read models for records already in memory. One statement for a collection.
+      #
+      #   UserCard.for(user)     # one object, like find(user.id)
+      #   UserCard.for(users)    # array, same order, one SQL
+      #   UserCard.for(scope)    # an unloaded relation stays a subquery
+      def for(records)
+        all.for(records)
+      end
+
       def first
         all.first
       end

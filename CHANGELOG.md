@@ -23,7 +23,12 @@
   `default_scope`d associations.
 - Result objects serialise as their data: `as_json`, `to_json` and `to_hash`, so
   `render json: result` no longer emits `{"attributes": {...}}`.
-- Composite primary keys no longer break `first`; `find` raises a descriptive
+- `Query.for(record)`, `.for(records)` and `.for(relation)` fetch a read model
+  for records already in memory, in one statement. Collections keep input order;
+  an unloaded relation becomes a subquery of its conditions alone, and one with
+  `limit`/`offset` or `group`/`having` raises instead of returning arbitrary or
+  invalid rows.
+- Composite primary keys no longer break `first`; `find`/`for` raise a descriptive
   error for them.
 - Query subclasses inherit `source` and `schema` from the query they subclass.
 - `first` orders by primary key when the relation has no order, like ActiveRecord.

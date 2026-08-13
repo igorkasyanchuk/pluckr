@@ -69,12 +69,12 @@ associations and four aggregates):
 
 | rows | ActiveRecord, N+1 | ActiveRecord, preloaded + grouped | Pluckr |
 | ---: | ---: | ---: | ---: |
-| 10 | 49 SQL / 4.95 ms | 5 SQL / 0.82 ms | **1 SQL / 0.35 ms** |
-| 100 | 481 SQL / 49.0 ms | 5 SQL / 2.90 ms | **1 SQL / 0.99 ms** |
-| 1,000 | 4,801 SQL / 493 ms | 5 SQL / 23.3 ms | **1 SQL / 11.7 ms** |
-| 10,000 | 48,001 SQL / 4,872 ms | 5 SQL / 286 ms | **1 SQL / 98.5 ms** |
+| 10 | 49 SQL / 5.00 ms | 5 SQL / 0.85 ms | **1 SQL / 0.36 ms** |
+| 100 | 481 SQL / 49.1 ms | 5 SQL / 2.89 ms | **1 SQL / 0.96 ms** |
+| 1,000 | 4,801 SQL / 493 ms | 5 SQL / 23.6 ms | **1 SQL / 12.3 ms** |
+| 10,000 | 48,001 SQL / 4,882 ms | 5 SQL / 290 ms | **1 SQL / 98.3 ms** |
 
-2-3x faster than careful hand-written ActiveRecord, 12-55x faster than a
+2-3x faster than careful hand-written ActiveRecord, 10-51x faster than a
 forgotten preload, and the gap grows with every millisecond of network latency
 between the app and the database, because Pluckr always sends one statement. It
 also grows with the read model: a wider card costs ActiveRecord one more query
@@ -99,14 +99,33 @@ UserSummary.where(active: true)
            .offset(100)
            .fetch
 UserSummary.where(active: true).to_sql
+
+UserSummary.for(user)              # one record you already have
+UserSummary.for(users)             # those records, one statement, same order
+UserSummary.for(User.active)       # a relation, still one statement
 ```
 
 `where`/`where.not`/`order`/`limit`/`offset` are ActiveRecord's own - Pluckr
 passes them through to the root relation and adds its projections on top. Every
-chain is immutable, nothing runs until `fetch`/`find`/`first`, and every
+chain is immutable, nothing runs until `fetch`/`find`/`first`/`for`, and every
 execution is exactly one statement no matter how many nodes the schema has.
 `first` orders by the primary key when the chain has no order of its own, like
 ActiveRecord does.
+
+`.for` is for records (or a relation of them) already in hand. A collection is
+aligned to the input order, so the schema must include the primary key
+(`field :id`); a missing row raises `RecordNotFound`, and the conditions of the
+query itself still apply. An unloaded relation becomes a subquery, so its rows
+are never instantiated - and then the order and the row count are the query's
+own, not the relation's. Only its conditions are used - `select`, `order` and any
+preloading are dropped, and a `lock` is never carried into a read model. What
+cannot be dropped without changing which rows come back raises instead:
+`limit`/`offset` (an unordered subquery would pick arbitrary rows) and
+`group`/`having`. Load those (`for(relation.to_a)`).
+
+Do not loop `find` / `.for` per record. Lists you do not already have as AR
+objects should stay `UserSummary.where(...).fetch` - never
+`User.all.map { UserSummary.for(_1) }`.
 
 Subclassing a query inherits its `source` and `schema`; the subclass can declare
 its own `schema` to replace them.
@@ -432,7 +451,7 @@ The compiler never sees DSL state, so new node types are additive.
   `Pluckr.batch` handles all of them, since ActiveRecord builds the SQL.
 - `where:`/`scope:` on `first`/`last`
 - composite primary keys are readable, and `first` orders by every key column,
-  but `find` needs a single-column key and says so
+  but `find`/`for` need a single-column key and say so
 - writes, serializers, pagination beyond `limit`/`offset`, caching
 
 ## What Pluckr is not
@@ -571,6 +590,8 @@ MySQL; changes should pass on SQLite and PostgreSQL locally before pushing.
 Benchmarks live in `benchmarks/read_models.rb` - see
 [Benchmarks](#benchmarks) above. [AGENTS.md](AGENTS.md) documents the internals,
 the invariants and why the generated SQL looks the way it does.
+[PROMPT.md](PROMPT.md) is a copy-paste system prompt for other AIs generating
+Pluckr queries (use `.for` in bulk, never `has_pluckr` on models).
 
 ## License
 

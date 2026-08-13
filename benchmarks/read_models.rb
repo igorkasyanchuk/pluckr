@@ -183,6 +183,16 @@ def pluckr_list(page)
   UserSummary.where(active: true).order(:id).limit(page).fetch.map(&:to_h)
 end
 
+# `.for` over records Ruby already holds: one statement for the collection...
+def pluckr_for_bulk(records)
+  UserSummary.for(records).map(&:to_h)
+end
+
+# ...or the mistake it exists to prevent, one statement per record.
+def pluckr_for_loop(records)
+  records.map { |record| UserSummary.for(record).to_h }
+end
+
 # The same card, hand-written: preloads plus one grouped query per aggregate.
 def ar_tuned_card(page)
   users = User.where(active: true).order(:id).limit(page).includes(:manager, subscription: :plan).to_a
@@ -348,6 +358,21 @@ PAGES.each do |page|
   puts
 end
 
+puts "Records already in memory: `.for` in bulk vs one call per record"
+puts HEADER
+PAGES.each do |page|
+  records = User.where(active: true).order(:id).limit(page).to_a
+  print_rows([
+               measure("Pluckr, .for per record", rows: page, runs: runs_for(page, naive: true)) do
+                 pluckr_for_loop(records)
+               end,
+               measure("Pluckr, .for in bulk", rows: page, runs: runs_for(page)) do
+                 pluckr_for_bulk(records)
+               end
+             ])
+  puts
+end
+
 puts "Wide card: 3 fields, 2 nested associations, exists, 3 counts, 1 sum"
 puts HEADER
 PAGES.each do |page|
@@ -376,6 +401,8 @@ explain_all!(id)
 raise "single mismatch" unless ar_naive_single(id).values_at(:id, :videos_count) ==
                               pluckr_single(id).values_at(:id, :videos_count)
 raise "list mismatch" unless ar_tuned_list(100).map { |r| r[:id] } == pluckr_list(100).map { |r| r[:id] }
+page = User.where(active: true).order(:id).limit(100).to_a
+raise "for mismatch" unless pluckr_for_bulk(page) == pluckr_for_loop(page)
 raise "dashboard mismatch" unless ar_dashboard == pluckr_dashboard
 raise "card mismatch" unless ar_tuned_card(50) == ar_naive_card(50)
 raise "card mismatch" unless ar_tuned_card(50) == pluckr_card(50).map { |row|

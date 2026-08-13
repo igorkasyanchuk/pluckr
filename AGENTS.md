@@ -11,7 +11,7 @@ SQLite.
 
 ```
 lib/pluckr/
-  query.rb                   class-level API: source, schema, find, fetch, first, to_sql
+  query.rb                   class-level API: source, schema, find, for, fetch, first, to_sql
   relation.rb                immutable chaining + WhereChain, delegates root filtering to AR
   batch.rb                   Pluckr.batch - ad-hoc aggregates over caller-supplied relations
   schema/definition.rb       evaluates the DSL, validates, builds the AST
@@ -34,7 +34,15 @@ Pipeline: `DSL -> schema AST -> reflection -> SQL compiler -> flat row -> result
 `first`/`last` (`via:`, `order:`, fields only),
 `exists` and `count`/`sum`/`avg`/`min`/`max` (`as:`, `via:`, `from:`, `column:`,
 `where:`, `scope:`; `average` aliases `avg`). Query classes answer `where`/`where.not`/`order`/`limit`/
-`offset`/`find`/`first`/`fetch`/`to_sql`/`source_model`.
+`offset`/`find`/`for`/`first`/`fetch`/`to_sql`/`source_model`.
+`.for` takes one AR record, a collection of them, or a relation of the source
+model: one SQL statement, collections aligned to input order (requires `field`
+on the primary key). An unloaded relation becomes a subquery, so its rows are
+never instantiated: only its conditions survive (`UNUSED_RELATION_VALUES` drops
+`select`/`order`/preloads/`lock`), and anything that would change which rows come
+back raises - `limit`/`offset` (no ORDER BY in the subquery, and MySQL rejects
+`IN (SELECT ... LIMIT ...)`) and `group`/`having`. Not an association on the AR
+model - never `has_pluckr`.
 
 `Pluckr.batch` is the second entry point: it takes relations the caller already
 built and wraps each one in a derived table, so ActiveRecord's own scoping
@@ -85,7 +93,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-235 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+278 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
