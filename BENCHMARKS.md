@@ -59,7 +59,7 @@ counts (one of them scoped) and a sum:
 
 Everything below is reproducible with `bundle exec ruby benchmarks/read_models.rb`.
 
-## Two pictures
+## One picture
 
 Statements are the term that survives the trip to production, because each one
 costs a round trip no matter how fast the query is. A page of 100 rows of
@@ -71,18 +71,6 @@ xychart-beta
     x-axis ["AR, N+1", "AR, preloaded + grouped", "Pluckr"]
     y-axis "statements" 0 --> 500
     bar [481, 5, 1]
-```
-
-And the mistake `.for` exists to prevent - the same records read one call at a
-time instead of in bulk. Bulk stays at one statement whatever the size, so the
-gap widens with the page (PostgreSQL, `.for` per record ÷ `.for` in bulk):
-
-```mermaid
-xychart-beta
-    title "How much slower .for per record is than .for in bulk"
-    x-axis ["10 records", "100 records", "1,000 records", "10,000 records"]
-    y-axis "times slower" 0 --> 90
-    bar [6.5, 32.9, 40.2, 86.1]
 ```
 
 The milliseconds stay in the tables below: they span 0.24 ms to 10.4 s, and a
