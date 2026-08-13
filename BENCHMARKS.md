@@ -5,6 +5,14 @@
 Two read models, fetched three ways each. PostgreSQL 17, 50k users, indexed
 schema.
 
+**Every number here is a local laptop over a unix socket**, where a round trip
+costs ~0.05-0.2 ms - so the absolute milliseconds are a floor, not a promise.
+Production has a database on the other end of a network, and the one term Pluckr
+removes is exactly the one that grows there:
+[What to expect in production](#what-to-expect-in-production) estimates that
+case - a page of 100 at a 1 ms round trip is ~529 ms of N+1, ~8 ms of careful
+ActiveRecord and ~2 ms of Pluckr. Ratios travel; absolute times do not.
+
 **`UserSummary`** - `id`, `email`, a nested `subscription.plan`, an existence
 check and a count:
 
