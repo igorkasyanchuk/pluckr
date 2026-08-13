@@ -76,7 +76,8 @@ module Pluckr
     def fetch
       scope = schema
       compiler = Compiler::Sql.new(schema: scope)
-      row = compiler.connection.select_all(compiler.aggregate_only_sql, "Pluckr Batch").first
+      row = Pluckr.select_all(compiler.connection, compiler.aggregate_only_sql,
+                              name: "Pluckr::Batch", label: "Pluckr Batch").first
 
       Result::Builder.new(scope, label: "Pluckr::Batch").build(row)
     end

@@ -3,7 +3,8 @@
 A declarative read-query layer for ActiveRecord.
 
 Declare the data a screen or endpoint needs, get one SQL statement and a plain
-Ruby object back. No ActiveRecord models are instantiated.
+Ruby object back. The rows it returns are never instantiated as ActiveRecord
+models.
 
 ```ruby
 user.id
@@ -103,14 +104,28 @@ UserSummary.where(active: true).to_sql
 UserSummary.for(user)              # one record you already have
 UserSummary.for(users)             # those records, one statement, same order
 UserSummary.for(User.active)       # a relation, still one statement
+
+UserSummary.find_by(email: "a@b.c")       # first match, or nil (find_by! raises)
+UserSummary.last                          # the other end; first(n)/last(n)/take(n) too
+UserSummary.where(active: true).count     # SELECT COUNT(*), not a fetch counted in Ruby
+UserSummary.where(active: true).exists?   # SELECT 1
+UserSummary.find_each { |row| ... }       # the whole table, a page at a time
+UserSummary.where(active: true).explain   # the plan for the statement Pluckr runs
 ```
 
 `where`/`where.not`/`order`/`limit`/`offset` are ActiveRecord's own - Pluckr
 passes them through to the root relation and adds its projections on top. Every
-chain is immutable, nothing runs until `fetch`/`find`/`first`/`for`, and every
-execution is exactly one statement no matter how many nodes the schema has.
+chain is immutable, nothing runs until you read from it, and a read of the model
+itself - `fetch`/`find`/`find_by`/`first`/`last`/`take`/`for` - is exactly one
+statement no matter how many nodes the schema has. The exceptions are the ones
+that say so: `.for` on a paginated relation is two, `find_each`/`in_batches` are
+one per page, and `count`/`exists?` and their friends are one statement that
+compiles no nodes at all.
 `first` orders by the primary key when the chain has no order of its own, like
-ActiveRecord does.
+ActiveRecord does. `find` takes one id, several, or an array of them; the
+several-ids form comes back as an array in the order you asked for, which - like
+`.for` and `find_each` - needs the primary key on the schema (`field :id`) to
+line results up. One id needs nothing.
 
 `.for` is for records (or a relation of them) already in hand. A collection is
 aligned to the input order, so the schema must include the primary key
@@ -118,14 +133,44 @@ aligned to the input order, so the schema must include the primary key
 query itself still apply. An unloaded relation becomes a subquery, so its rows
 are never instantiated - and then the order and the row count are the query's
 own, not the relation's. Only its conditions are used - `select`, `order` and any
-preloading are dropped, and a `lock` is never carried into a read model. What
-cannot be dropped without changing which rows come back raises instead:
-`limit`/`offset` (an unordered subquery would pick arbitrary rows) and
-`group`/`having`. Load those (`for(relation.to_a)`).
+preloading are dropped, and a `lock` is never carried into a read model.
+
+A paginated relation (`limit`/`offset`) is the exception: which rows a page holds
+depends on the order a subquery cannot carry, so its primary keys are read first
+and the read model follows in a second, narrow statement - still no records
+instantiated, and the page and its order are the relation's own, joins included.
+The exception is a relation that joins to preload (`includes`/`eager_load`),
+whose `LIMIT` counts parent rows rather than joined ones: that page is resolved
+the way ActiveRecord resolves it, by loading it, since you asked for preloaded
+records anyway.
+It is a relation either way, so a row the query's own conditions exclude is
+simply absent, as it is for an unpaginated one - only records you hand over
+yourself raise `RecordNotFound` when they are gone. `group`/`having` is not valid
+SQL either way and raises; load it (`for(relation.to_a)`).
 
 Do not loop `find` / `.for` per record. Lists you do not already have as AR
 objects should stay `UserSummary.where(...).fetch` - never
 `User.all.map { UserSummary.for(_1) }`.
+
+`count`, `size`, `exists?`, `any?`, `none?`, `empty?`, `one?` and `many?` are
+questions about the root rows, so ActiveRecord answers them with
+`COUNT(*)`/`SELECT 1` and none of the schema's nodes are compiled - a pagination
+total does not build 25,000 result objects. Pass a block (or an Enumerable
+pattern) and Enumerable answers over the results instead, as it always did.
+
+`first`, `last` and `take` read with a `LIMIT` and take an optional count
+(`first(10)`), rather than hydrating the chain to keep a few rows of it. Each
+follows ActiveRecord on a chain that already pages: `first(n)` cannot read past
+the page, `last` is the last row of it, `one?`/`many?` never widen your `limit`
+to reach an answer - and `take(n)`, like ActiveRecord's, does replace it.
+
+`find_each`/`in_batches` read a whole chain in pages, so an export does not build
+every result object at once. Batches are ordered by primary key and any order of
+your own is ignored, like ActiveRecord's; unlike ActiveRecord's, each page after
+the first is a keyset seek (`WHERE id > <last>`), never an `OFFSET`, so the last
+page costs the same as the first. The schema needs the primary key
+(`field :id`), and a chain that already has a `limit`/`offset` raises rather than
+having it silently overridden.
 
 Subclassing a query inherits its `source` and `schema`; the subclass can declare
 its own `schema` to replace them.
@@ -422,6 +467,27 @@ The rest raise on first compilation, where the context exists to detect them: a
 is not a Hash or naming an unknown column, `limit`/`offset`/`group` inside a
 scope, output aliases longer than the database's identifier limit, and a query
 whose models do not share a database connection.
+
+## Instrumentation
+
+Every statement Pluckr runs publishes one `fetch.pluckr` event, so one
+subscription covers `fetch`, `find`, `first`, `for` and `Pluckr.batch`:
+
+```ruby
+ActiveSupport::Notifications.subscribe("fetch.pluckr") do |*args|
+  event = ActiveSupport::Notifications::Event.new(*args)
+
+  event.payload[:name]  # => "UserSummary" (or "Pluckr::Batch")
+  event.payload[:sql]   # => "SELECT ..."
+  event.payload[:rows]  # => 100
+  event.duration        # => 0.96 (ms)
+end
+```
+
+Nothing subscribes by default, and the event covers the statements Pluckr
+compiles. The ones it does not - `count`/`exists?` and the primary keys read for
+a paginated `.for` - are ActiveRecord's own and arrive as `sql.active_record`
+like any other.
 
 ## How it works
 

@@ -41,12 +41,15 @@ Lists and filters live on the query, not on `User`:
 ```ruby
 UserCard.where(active: true).order(created_at: :desc).limit(50).fetch
 UserCard.find(id)
-UserCard.first
+UserCard.find_by(email: "a@b.c")       # nil if absent; find_by! raises
+UserCard.first                         # also first(n) / last / last(n) / take(n)
+UserCard.where(active: true).count     # COUNT(*) - also exists?/any?/none?/empty?/one?/many?
+UserCard.find_each { |row| ... }       # the whole table, a page at a time
 ```
 
 ## Records you already have (`.for`)
 
-When Ruby already holds AR records (or a relation of them), use `.for`. It is **one statement** for a collection, and keeps array order.
+When Ruby already holds AR records (or a relation of them), use `.for`. It is **one statement** for a collection (two for a paginated relation), and keeps array order.
 
 ```ruby
 UserCard.for(user)            # one object (RecordNotFound if gone)
@@ -58,7 +61,9 @@ Rules for `.for`:
 
 - a collection requires `field :id` (or `field :id, as: ...`) on the schema, so rows can be aligned to the input order; empty collection gives `[]`, a missing row raises `ActiveRecord::RecordNotFound`
 - the query's own `where` still applies, so `Query.where(active: true).for(inactive_record)` raises `RecordNotFound`
-- an unloaded relation is passed as a subquery, so only its conditions count: order and row count are the query's, not the relation's, and `lock` is dropped. `limit`/`offset` or `group`/`having` on it raises `Pluckr::ConfigurationError` - load the relation instead (`for(relation.to_a)`)
+- an unloaded relation is passed as a subquery, so only its conditions count: order and row count are the query's, not the relation's, and `lock` is dropped
+- a paginated relation (`limit`/`offset`) instead reads its primary keys first and the read model second - two statements, and the page and its order are the relation's own. No records are instantiated unless the relation joins to preload (`includes`/`eager_load`), whose `LIMIT` counts parent rows, so ActiveRecord pages it. Rows the query's own `where` excludes are absent rather than `RecordNotFound`; that is reserved for records you hand over yourself
+- `group`/`having` on a relation raises `Pluckr::ConfigurationError` - load it instead (`for(relation.to_a)`)
 - do not pass a Pluckr query to `.for`; it takes AR records. Use `fetch`
 - wrong model, or a composite primary key: `Pluckr::ConfigurationError`. Composite keys use `where(...).first`
 
@@ -104,4 +109,4 @@ end
 
 ## SQL budget
 
-Every `fetch` / `find` / `first` / `for` is one statement. If you emit more than one Pluckr query per request for the same screen, you are using it wrong — widen the schema or use `Pluckr.batch`.
+Every `fetch` / `find` / `first` / `last` / `take` / `for` is one statement, no matter how many nodes the schema has. Two only for `.for(paginated_relation)` (keys, then the read) and one per page for `find_each` / `in_batches`. `count` / `exists?` / `any?` / `none?` / `empty?` / `one?` / `many?` are one statement each and build no result objects. If you emit more than one Pluckr query per request for the same screen, you are using it wrong — widen the schema or use `Pluckr.batch`.

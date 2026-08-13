@@ -247,6 +247,21 @@ def pluckr_card(page)
   UserCard.where(active: true).order(:id).limit(page).fetch.map(&:to_h)
 end
 
+def card_page(page)
+  User.where(active: true).order(:id).limit(page)
+end
+
+# An ordered page handed to `.for`: its keys are read first, then the card, so
+# the page and its order are the relation's and no user is ever instantiated.
+def pluckr_card_for_page(page)
+  UserCard.for(card_page(page)).map(&:to_h)
+end
+
+# The same page loaded into ActiveRecord objects first, then read in bulk.
+def pluckr_card_for_loaded(page)
+  UserCard.for(card_page(page).to_a).map(&:to_h)
+end
+
 def ar_dashboard
   { users: User.count, comments: Comment.count, active_accounts: Account.where(active: true).count }
 end
@@ -388,6 +403,23 @@ PAGES.each do |page|
   puts
 end
 
+puts "The same card for an ordered page, via `.for`"
+puts HEADER
+PAGES.each do |page|
+  print_rows([
+               measure("ActiveRecord, preloaded + grouped", rows: page, runs: runs_for(page)) do
+                 ar_tuned_card(page)
+               end,
+               measure("Pluckr, .for(page.to_a)", rows: page, runs: runs_for(page)) do
+                 pluckr_card_for_loaded(page)
+               end,
+               measure("Pluckr, .for(ordered page)", rows: page, runs: runs_for(page)) do
+                 pluckr_card_for_page(page)
+               end
+             ])
+  puts
+end
+
 puts "Dashboard: 3 independent counts"
 puts HEADER
 print_rows([
@@ -404,6 +436,8 @@ raise "list mismatch" unless ar_tuned_list(100).map { |r| r[:id] } == pluckr_lis
 page = User.where(active: true).order(:id).limit(100).to_a
 raise "for mismatch" unless pluckr_for_bulk(page) == pluckr_for_loop(page)
 raise "dashboard mismatch" unless ar_dashboard == pluckr_dashboard
+raise "card page mismatch" unless pluckr_card(100) == pluckr_card_for_page(100)
+raise "card page mismatch" unless pluckr_card(100) == pluckr_card_for_loaded(100)
 raise "card mismatch" unless ar_tuned_card(50) == ar_naive_card(50)
 raise "card mismatch" unless ar_tuned_card(50) == pluckr_card(50).map { |row|
   row.merge(subscription: row[:subscription]&.fetch(:name), plan: row.dig(:subscription, :plan, :name),

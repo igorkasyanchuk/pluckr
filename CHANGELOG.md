@@ -25,9 +25,26 @@
   `render json: result` no longer emits `{"attributes": {...}}`.
 - `Query.for(record)`, `.for(records)` and `.for(relation)` fetch a read model
   for records already in memory, in one statement. Collections keep input order;
-  an unloaded relation becomes a subquery of its conditions alone, and one with
-  `limit`/`offset` or `group`/`having` raises instead of returning arbitrary or
-  invalid rows.
+  an unloaded relation becomes a subquery of its conditions alone, a paginated
+  one is resolved to primary keys first (two statements, its own page and order),
+  and `group`/`having` raises instead of generating invalid SQL.
+- `last`/`last!`/`take`/`take!` and a count for `first`/`last`/`take`
+  (`first(10)`), read with a `LIMIT` rather than by hydrating the chain and
+  throwing most of it away.
+- `count`/`size`/`exists?`/`any?`/`none?`/`empty?`/`one?`/`many?` ask the database (`COUNT(*)`,
+  `SELECT 1`) instead of letting Enumerable build every result object first; a
+  block still sends `any?`/`none?` back to Enumerable.
+- `find_by`/`find_by!` (ActiveRecord's arity: a condition is required) and
+  `explain`, which explains the statement Pluckr runs.
+- `find` takes several ids (or an array) and returns them in the order asked,
+  sends a block to Enumerable, and treats `find(nil)` as `RecordNotFound` -
+  ActiveRecord's behaviour in each case.
+- `find_each`/`in_batches` read a whole chain in pages, seeking by primary key
+  rather than paging with `OFFSET`. Needs `field` on the primary key; refuses a
+  chain that already has a `limit`/`offset`.
+- Every statement publishes an `ActiveSupport::Notifications` `fetch.pluckr`
+  event with `:name`, `:sql` and `:rows`, covering `fetch`, `find`, `first`,
+  `for` and `Pluckr.batch`.
 - Composite primary keys no longer break `first`; `find`/`for` raise a descriptive
   error for them.
 - Query subclasses inherit `source` and `schema` from the query they subclass.

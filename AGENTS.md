@@ -34,15 +34,47 @@ Pipeline: `DSL -> schema AST -> reflection -> SQL compiler -> flat row -> result
 `first`/`last` (`via:`, `order:`, fields only),
 `exists` and `count`/`sum`/`avg`/`min`/`max` (`as:`, `via:`, `from:`, `column:`,
 `where:`, `scope:`; `average` aliases `avg`). Query classes answer `where`/`where.not`/`order`/`limit`/
-`offset`/`find`/`for`/`first`/`fetch`/`to_sql`/`source_model`.
+`offset`/`find`/`find_by`/`for`/`first`/`last`/`take`/`fetch`/`count`/`exists?`/
+`one?`/`many?`/`find_each`/`in_batches`/`explain`/`to_sql`/`source_model`
+(`first`/`last`/`take` also take a count; all three have a bang version).
+`first`/`last`/`take`/`one?`/`many?` are defined rather than left to Enumerable,
+which would have read the whole chain to answer them. On a chain that already
+pages they follow AR exactly: `first(n)` clamps to the page (`find_nth_with_limit`),
+`last` reads the page and takes its tail (`find_last`), `one?`/`many?` go through
+`limited_count` (`limit_value ? count : limit(2).count`) - and `take(n)` replaces
+the limit, because AR's does. `find` takes ids or an array of them, sends a block
+to Enumerable, and treats `find(nil)` as `RecordNotFound`, all like AR; the
+several-ids form goes through `for_ids`, so it needs `field` on the primary key
+the way `.for` and batching do, while a single id does not.
+`count`/`size`/`exists?`/`any?`/`none?`/`empty?` are delegated to the root AR
+relation and compile no nodes - Enumerable would have answered them by building
+every result object first. A block or a pattern argument goes back to Enumerable
+(`return super if args.any? || block_given?`), mirroring
+`ActiveRecord::Relation#any?`. `find_each`/`in_batches` seek by primary key
+(`WHERE id > <last>`, never `OFFSET`), reorder by it, need `field` on it, and
+refuse a chain that already has a `limit`/`offset`.
 `.for` takes one AR record, a collection of them, or a relation of the source
 model: one SQL statement, collections aligned to input order (requires `field`
 on the primary key). An unloaded relation becomes a subquery, so its rows are
 never instantiated: only its conditions survive (`UNUSED_RELATION_VALUES` drops
-`select`/`order`/preloads/`lock`), and anything that would change which rows come
-back raises - `limit`/`offset` (no ORDER BY in the subquery, and MySQL rejects
-`IN (SELECT ... LIMIT ...)`) and `group`/`having`. Not an association on the AR
-model - never `has_pluckr`.
+`select`/`order`/preloads/`lock`). A `limit`/`offset` cannot survive that (the
+subquery loses the ORDER BY the page depends on, and MySQL rejects
+`IN (SELECT ... LIMIT ...)`), so a paginated relation is plucked to primary keys
+first and read by id: two statements, nothing instantiated. That pluck keeps the
+joins the order may depend on (`PAGINATED_RELATION_VALUES` drops only
+`select`/`lock`); a relation that joins to preload (`eager_loading?` or
+`includes_values`) is loaded instead, because its `LIMIT` counts parent rows and
+`pluck` would cut the page mid fan-out - see `page_keys`. Keys read
+non-strictly - a relation is a set of conditions, so
+rows the query filters out are absent rather than `RecordNotFound`, which stays
+the answer only for records the caller handed over. Only `group`/`having` raises.
+Not an association on the AR model - never `has_pluckr`.
+
+Every read of a compiled read model goes through `Pluckr.select_all`
+(`lib/pluckr.rb`), which wraps `connection.select_all` in a `fetch.pluckr`
+notification carrying `:name`, `:sql` and `:rows`. Add execution paths there, not
+around it. Statements Pluckr does not compile stay ActiveRecord's and publish
+nothing: `count`/`exists?` and the `pluck` a paginated `.for` runs first.
 
 `Pluckr.batch` is the second entry point: it takes relations the caller already
 built and wraps each one in a derived table, so ActiveRecord's own scoping
@@ -93,7 +125,7 @@ DB=postgres bundle exec rspec  # needs a running PostgreSQL
 DB=mysql bundle exec rspec     # CI covers this one
 ```
 
-278 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
+387 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
 adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
@@ -141,7 +173,9 @@ and update that file whenever the compiler's output changes.
   context (a `scope:`'s return value, alias length) may raise later.
 - Never interpolate values into SQL. Conditions go through ActiveRecord or Arel;
   identifiers are validated against `column_names` / reflection first.
-- Never instantiate ActiveRecord objects for selected rows.
+- Never instantiate ActiveRecord objects for the rows a query returns. The one
+  place records are loaded is `page_keys`, and only for a relation the caller
+  already told ActiveRecord to preload.
 - One SQL statement per execution. `has_many` is never joined, and everything a
   query touches must live on one connection pool - checked when compiling,
   walking nested scopes, and when a batch entry is added.

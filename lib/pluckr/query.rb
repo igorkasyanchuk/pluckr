@@ -79,8 +79,46 @@ module Pluckr
         all.offset(value)
       end
 
-      def find(id)
-        all.find(id)
+      def find(...)
+        all.find(...)
+      end
+
+      def find_by(...)
+        all.find_by(...)
+      end
+
+      def find_by!(...)
+        all.find_by!(...)
+      end
+
+      # `COUNT(*)`/`SELECT 1` over the root rows, not a fetch counted in Ruby.
+      def count(...)
+        all.count(...)
+      end
+      alias_method :size, :count
+
+      def exists?(...)
+        all.exists?(...)
+      end
+
+      def any?(...)
+        all.any?(...)
+      end
+
+      def none?(...)
+        all.none?(...)
+      end
+
+      def empty?
+        all.empty?
+      end
+
+      def find_each(...)
+        all.find_each(...)
+      end
+
+      def in_batches(...)
+        all.in_batches(...)
       end
 
       # Read models for records already in memory. One statement for a collection.
@@ -88,12 +126,41 @@ module Pluckr
       #   UserCard.for(user)     # one object, like find(user.id)
       #   UserCard.for(users)    # array, same order, one SQL
       #   UserCard.for(scope)    # an unloaded relation stays a subquery
+      #   UserCard.for(scope.limit(2)) # a page: its keys first, then one read
       def for(records)
         all.for(records)
       end
 
-      def first
-        all.first
+      def first(...)
+        all.first(...)
+      end
+
+      def first!
+        all.first!
+      end
+
+      def last(...)
+        all.last(...)
+      end
+
+      def last!
+        all.last!
+      end
+
+      def take(...)
+        all.take(...)
+      end
+
+      def take!
+        all.take!
+      end
+
+      def one?(...)
+        all.one?(...)
+      end
+
+      def many?(...)
+        all.many?(...)
       end
 
       def fetch
@@ -102,6 +169,10 @@ module Pluckr
 
       def to_sql
         source_rooted? ? all.to_sql : compiler.aggregate_only_sql
+      end
+
+      def explain(...)
+        all.explain(...)
       end
 
       # ---------------------------------------------------------- internals --
@@ -123,7 +194,7 @@ module Pluckr
       end
 
       def fetch_aggregates
-        row = compiler.connection.select_all(to_sql, "#{name} Pluckr").first
+        row = Pluckr.select_all(compiler.connection, to_sql, name: name).first
         result_builder.build(row)
       end
 
