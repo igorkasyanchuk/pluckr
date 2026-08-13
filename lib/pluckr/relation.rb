@@ -154,8 +154,12 @@ module Pluckr
       end
 
       assert_subqueryable!(records)
+      scope = records.except(*UNUSED_RELATION_VALUES)
+      # `offset(0)` skips nothing, but ActiveRecord still emits a LIMIT for it,
+      # and MySQL cannot subquery a LIMIT at all.
+      scope = scope.except(:offset) if scope.offset_value&.zero?
 
-      where(key => records.except(*UNUSED_RELATION_VALUES).select(key)).fetch
+      where(key => scope.select(key)).fetch
     end
 
     # The subquery carries no ORDER BY, so `limit`/`offset` would pick arbitrary
