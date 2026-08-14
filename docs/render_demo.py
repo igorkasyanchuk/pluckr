@@ -6,6 +6,7 @@ Drawn at 2× then downsampled to 1440×810 so type stays sharp on a retina READM
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -61,17 +62,16 @@ CODE = """class UserSummary < Pluckr::Query
     count :videos
   end
 end
-
 user = UserSummary.find(1)"""
 
 SQL = '''SELECT users.id,
        users.email,
-       sub.name              AS "subscription.name",
+       sub.name AS "subscription.name",
        EXISTS (
          SELECT 1 FROM photos
           WHERE photos.user_id = users.id
           LIMIT 1 OFFSET 0
-       )                     AS photos_exists,
+       ) AS photos_exists,
        (SELECT COUNT(*) FROM videos
          WHERE videos.user_id = users.id) AS videos_count
   FROM users
@@ -92,6 +92,22 @@ STEPS = [
     ("3", "Result", "A frozen object, no ActiveRecord"),
 ]
 
+# Layout — logical px. Title / pills / caption share CONTENT as the left ink edge.
+MARGIN = 32
+INSET = 28
+WIN = (MARGIN, 28, LW - MARGIN, LH - 22)
+CONTENT = MARGIN + INSET  # 60
+PILL_H = 32
+TITLE_CY = WIN[1] + 28
+PILL_Y = TITLE_CY + 24
+CAP_CY = PILL_Y + PILL_H + 22
+EDITOR = (CONTENT, CAP_CY + 28, LW - CONTENT, WIN[3] - 22)
+GUTTER_LEFT = 28
+GUTTER_W = 40
+CODE_GAP = 20
+CODE_PAD_Y = 34
+LINE_H = 19
+
 
 def px(v: float) -> int:
     return int(round(v * DRAW))
@@ -102,10 +118,10 @@ def font(path: str, size: float, index: int = 0) -> ImageFont.FreeTypeFont:
 
 
 FONT_UI = font("/System/Library/Fonts/SFNS.ttf", 15)
-FONT_UI_SM = font("/System/Library/Fonts/SFNS.ttf", 13.5)
+FONT_UI_SM = font("/System/Library/Fonts/SFNS.ttf", 13)
 FONT_TITLE = font("/System/Library/Fonts/SFNS.ttf", 20)
-FONT_CODE = font("/System/Library/Fonts/SFNSMono.ttf", 15.5)
-FONT_BADGE = font("/System/Library/Fonts/SFNS.ttf", 12.5)
+FONT_CODE = font("/System/Library/Fonts/SFNSMono.ttf", 15)
+FONT_BADGE = font("/System/Library/Fonts/SFNS.ttf", 12)
 
 
 def mix(c1, c2, t):
@@ -119,12 +135,71 @@ def box(x0, y0, x1, y1):
 
 def rounded(draw, coords, radius, fill, outline=None, width=1.0):
     draw.rounded_rectangle(
-        box(*coords) if len(coords) == 4 and not isinstance(coords[0], tuple) else coords,
+        box(*coords),
         radius=px(radius),
         fill=fill,
         outline=outline,
         width=max(1, px(width)),
     )
+
+
+_RASTER_INK = {}
+
+
+def raster_ink(s, font_, thresh=48):
+    """Painted-pixel bbox relative to a top-left draw at (0, 0).
+
+    Pillow's textbbox follows the em-box; SFNS ink sits off-center inside it.
+    """
+    key = (s, id(font_), thresh)
+    hit = _RASTER_INK.get(key)
+    if hit is not None:
+        return hit
+    pad = 80
+    im = Image.new("L", (pad * 2 + 1000, pad * 2 + 160), 0)
+    ImageDraw.Draw(im).text((pad, pad), s, font=font_, fill=255)
+    mask = im.point(lambda p: 255 if p >= thresh else 0)
+    bb = mask.getbbox()
+    if bb is None:
+        hit = (0, 0, 0, 0)
+    else:
+        hit = (bb[0] - pad, bb[1] - pad, bb[2] - pad, bb[3] - pad)
+    _RASTER_INK[key] = hit
+    return hit
+
+
+def t_ink_center(draw, cx, cy, s, font_, fill):
+    """Place s so its painted ink is centered on logical (cx, cy)."""
+    l, t0, r, b = raster_ink(s, font_)
+    draw.text((px(cx) - (l + r) / 2, px(cy) - (t0 + b) / 2), s, font=font_, fill=fill)
+
+
+def t_ink_left_mid(draw, x, cy, s, font_, fill):
+    """Leftmost painted ink at x, vertical ink center at cy."""
+    l, t0, r, b = raster_ink(s, font_)
+    draw.text((px(x) - l, px(cy) - (t0 + b) / 2), s, font=font_, fill=fill)
+
+
+def t_ink_left_base(draw, x, baseline, s, font_, fill):
+    """Leftmost painted ink at x, alphabetic baseline at baseline."""
+    l, _, _, _ = draw.textbbox((0, 0), s, font=font_, anchor="ls")
+    draw.text((px(x) - l, px(baseline)), s, font=font_, fill=fill, anchor="ls")
+
+
+def t_ink_right_base(draw, x, baseline, s, font_, fill):
+    """Rightmost painted ink at x, alphabetic baseline at baseline."""
+    _, _, r, _ = draw.textbbox((0, 0), s, font=font_, anchor="ls")
+    draw.text((px(x) - r, px(baseline)), s, font=font_, fill=fill, anchor="ls")
+
+
+def ink_w(_draw, s, font_) -> float:
+    l, _, r, _ = raster_ink(s, font_)
+    return (r - l) / DRAW
+
+
+def cap_h(_draw, font_) -> float:
+    _, t0, _, b = raster_ink("H", font_)
+    return (b - t0) / DRAW
 
 
 def tokenize_ruby(line: str):
@@ -254,59 +329,77 @@ def tokenize_result(line: str):
     return tokens
 
 
-def draw_tokens(draw, x, y, tokens, font_, alpha=255):
-    x, y = px(x), px(y)
+def draw_tokens(draw, x, y, tokens, font_):
+    """Draw a tokenized line. (x, y) is logical left + alphabetic baseline."""
+    cursor = px(x)
+    by = px(y)
     for text, color in tokens:
         fill = TEXT if color is None else color
-        if alpha < 255:
-            fill = mix(CARD_INNER, fill, alpha / 255)
-        draw.text((x, y), text, font=font_, fill=fill)
-        x += draw.textlength(text, font=font_)
-    return x / DRAW
+        draw.text((cursor, by), text, font=font_, fill=fill, anchor="ls")
+        cursor += draw.textlength(text, font=font_)
+    return cursor / DRAW
 
 
 def shadow_window(base: Image.Image):
-    """Soft drop shadow so the window lifts off the page."""
     mask = Image.new("L", (W, H), 0)
     mdraw = ImageDraw.Draw(mask)
-    mdraw.rounded_rectangle(box(32, 28, LW - 28, LH - 20), radius=px(16), fill=140)
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=px(7)))
+    mdraw.rounded_rectangle(
+        box(WIN[0] + 2, WIN[1] + 6, WIN[2] + 6, WIN[3] + 10),
+        radius=px(16),
+        fill=120,
+    )
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=px(8)))
     shade = Image.new("RGB", (W, H), (0, 0, 0))
     return Image.composite(shade, base, mask)
 
 
 def draw_chrome(draw: ImageDraw.ImageDraw, active: int, caption: str, badge: str | None = None):
-    rounded(draw, (28, 22, LW - 28, LH - 22), 16, CARD, BORDER, 1.25)
+    rounded(draw, WIN, 16, CARD, BORDER, 1.2)
 
-    # Accent bar under the title, marks the active step.
-    draw.text((52, 38), "Pluckr", font=FONT_TITLE, fill=TEXT)
-    draw.text((140, 43), "one statement   ·   frozen result", font=FONT_UI_SM, fill=MUTED)
+    # Title + tagline share an ink vertical center so mixed sizes sit on one line.
+    t_ink_left_mid(draw, CONTENT, TITLE_CY, "Pluckr", FONT_TITLE, TEXT)
+    t_ink_left_mid(
+        draw,
+        CONTENT + ink_w(draw, "Pluckr", FONT_TITLE) + 16,
+        TITLE_CY,
+        "one statement  ·  frozen result",
+        FONT_UI_SM,
+        MUTED,
+    )
 
-    x, y = 52, 78
+    pill_cy = PILL_Y + PILL_H / 2
+    x = CONTENT
     for i, (num, label, _) in enumerate(STEPS):
         on = i == active
-        pill_w = 100 if i == 1 else 94
-        fill = mix(CARD, ACCENT, 0.22) if on else mix(CARD, CARD_INNER, 0.6)
+        label_s = f"{num}  {label}"
+        pill_w = ink_w(draw, label_s, FONT_UI_SM) + 40
+        fill = mix(CARD, ACCENT, 0.20) if on else CARD_INNER
         outline = ACCENT if on else HAIR
-        rounded(draw, (x, y, x + pill_w, y + 30), 15, fill, outline, 1.25)
-        draw.text((x + 14, y + 6), num, font=FONT_BADGE, fill=ACCENT if on else DIM)
-        draw.text((x + 30, y + 5), label, font=FONT_UI_SM, fill=TEXT if on else MUTED)
+        rounded(draw, (x, PILL_Y, x + pill_w, PILL_Y + PILL_H), 16, fill, outline, 1.15)
+        t_ink_center(draw, x + pill_w / 2, pill_cy, label_s, FONT_UI_SM, TEXT if on else MUTED)
         x += pill_w + 12
         if i < 2:
-            draw.text((px(x - 6), px(y + 5)), "→", font=FONT_UI, fill=DIM)
-            x += 10
+            t_ink_center(draw, x + 8, pill_cy, "→", FONT_UI_SM, DIM)
+            x += 16 + 12
 
-    draw.text((52, 120), caption, font=FONT_UI, fill=MUTED)
-
+    t_ink_left_mid(draw, CONTENT, CAP_CY, caption, FONT_UI, MUTED)
     if badge:
-        bw = 124
-        bx1 = LW - 52 - bw
-        rounded(draw, (bx1, 116, bx1 + bw, 140), 9, mix(CARD, ACCENT, 0.18), ACCENT, 1.25)
-        draw.text((bx1 + 12, 120), badge, font=FONT_BADGE, fill=ACCENT)
+        bw = ink_w(draw, badge, FONT_BADGE)
+        pad_x = 12
+        badge_w = bw + pad_x * 2
+        badge_h = 26
+        bx1 = EDITOR[2] - badge_w
+        rounded(
+            draw,
+            (bx1, CAP_CY - badge_h / 2, bx1 + badge_w, CAP_CY + badge_h / 2),
+            8,
+            mix(CARD, ACCENT, 0.16),
+            ACCENT,
+            1.15,
+        )
+        t_ink_center(draw, bx1 + badge_w / 2, CAP_CY, badge, FONT_BADGE, ACCENT)
 
-    rounded(draw, (48, 152, LW - 48, LH - 48), 12, CARD_INNER, HAIR, 1.15)
-    # hairline under the editor top, like a tab bar
-    draw.line([px(60), px(152), px(LW - 60), px(152)], fill=mix(HAIR, ACCENT, 0.35 if active == 1 else 0), width=px(1.5))
+    rounded(draw, EDITOR, 12, CARD_INNER, HAIR, 1.1)
 
 
 def draw_scene(active: int, visible_lines: int, extra_badge: str | None = None, caret=False):
@@ -321,24 +414,29 @@ def draw_scene(active: int, visible_lines: int, extra_badge: str | None = None, 
     lines = body.split("\n")
     shown = lines[:visible_lines]
 
-    x0, y0 = 94, 172
-    gutter = 64
-    lh = 22.5
+    ex0, ey0, ex1, ey1 = EDITOR
+    gutter_right = ex0 + GUTTER_LEFT + GUTTER_W
+    code_x = gutter_right + CODE_GAP
+    first_baseline = ey0 + CODE_PAD_Y + cap_h(draw, FONT_CODE)
+
     for i, line in enumerate(shown):
-        yy = y0 + i * lh
-        draw.text((px(gutter), px(yy)), f"{i + 1}", font=FONT_BADGE, fill=mix(CARD_INNER, DIM, 0.7))
-        end_x = draw_tokens(draw, x0, yy, tokenizer(line), FONT_CODE)
+        by = first_baseline + i * LINE_H
+        t_ink_right_base(draw, gutter_right, by, str(i + 1), FONT_BADGE, mix(CARD_INNER, MUTED, 0.55))
+        end_x = draw_tokens(draw, code_x, by, tokenizer(line), FONT_CODE)
         if caret and i == visible_lines - 1:
-            cx, cy = px(end_x + 1), px(yy + 2)
-            draw.rectangle((cx, cy, cx + px(2), cy + px(16)), fill=ACCENT)
+            cap = cap_h(draw, FONT_CODE)
+            cx, cy = px(end_x + 3), px(by - cap)
+            draw.rectangle((cx, cy, cx + px(2), px(by + 2)), fill=ACCENT)
 
     if active == 2 and visible_lines >= len(lines):
-        draw.text(
-            (px(86), px(LH - 78)),
-            "user.email     user.subscription.name     user.videos_count",
-            font=FONT_UI_SM,
-            fill=DIM,
+        note = "user.email    ·    user.subscription.name    ·    user.videos_count"
+        rule_y = ey1 - 52
+        draw.line(
+            [px(code_x), px(rule_y), px(ex1 - 28), px(rule_y)],
+            fill=HAIR,
+            width=px(1),
         )
+        t_ink_left_base(draw, code_x, ey1 - 28, note, FONT_UI_SM, MUTED)
 
     return img
 
@@ -364,13 +462,10 @@ def fade(frames, durations, a: Image.Image, b: Image.Image, seconds=0.28):
 
 def reveal(frames, durations, active: int, text: str, extra_badge=None, hold_end=1.7):
     lines = text.split("\n")
-    prev = None
     for n in range(1, len(lines) + 1):
         img = draw_scene(active, n, extra_badge=extra_badge, caret=n < len(lines))
         frames.append(img)
         durations.append(70 if n < len(lines) else 120)
-        prev = img
-    # settle without caret
     prev = draw_scene(active, len(lines), extra_badge=extra_badge, caret=False)
     hold(frames, durations, prev, hold_end)
     return prev
@@ -411,13 +506,8 @@ def main():
     encode(frames, durations)
     gifsicle = Path("/opt/homebrew/bin/gifsicle")
     if gifsicle.exists():
-        import subprocess
+        subprocess.check_call([str(gifsicle), "-O3", "--no-warnings", str(OUT_GIF), "-o", str(OUT_GIF)])
 
-        subprocess.check_call(
-            [str(gifsicle), "-O3", "--no-warnings", str(OUT_GIF), "-o", str(OUT_GIF)]
-        )
-
-    # Full-res PNG of the three beats, no GIF palette, for visual QA.
     qa = Path("/tmp/pluckr-demo-qa")
     qa.mkdir(exist_ok=True)
     downsample(draw_scene(0, len(CODE.split("\n")))).save(qa / "1-query.png")
