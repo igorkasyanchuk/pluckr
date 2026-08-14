@@ -1,5 +1,7 @@
 # Pluckr
 
+![Query → one SQL statement → frozen result](docs/demo.gif)
+
 A declarative read-query layer for ActiveRecord.
 
 Declare the data a screen or endpoint needs, get one SQL statement and a plain
