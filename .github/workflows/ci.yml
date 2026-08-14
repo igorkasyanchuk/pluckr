@@ -15,9 +15,10 @@ jobs:
       matrix:
         ruby: ["3.2", "3.4"]
         db: [sqlite, postgres, mysql]
-        # The full adapter surface runs against the lockfile's ActiveRecord;
-        # the pinned versions cover version compatibility on SQLite.
-        ar: [main, "7.1", "8.0"]
+        # The full adapter surface runs against the newest supported
+        # ActiveRecord; the older pinned versions cover version compatibility
+        # on SQLite.
+        ar: ["8.1", "7.1", "8.0"]
         exclude:
           - ar: "7.1"
             db: postgres
@@ -54,7 +55,7 @@ jobs:
 
     env:
       DB: ${{ matrix.db }}
-      BUNDLE_GEMFILE: ${{ matrix.ar == 'main' && 'Gemfile' || format('gemfiles/activerecord-{0}.gemfile', matrix.ar) }}
+      BUNDLE_GEMFILE: ${{ format('gemfiles/activerecord-{0}.gemfile', matrix.ar) }}
       PGHOST: 127.0.0.1
       PGPORT: "5432"
       PGUSER: postgres
