@@ -126,7 +126,9 @@ DB=mysql bundle exec rspec     # CI covers this one
 ```
 
 387 examples. CI (`.github/workflows/ci.yml`) runs ruby 3.2/3.4 against all three
-adapters. Changes must pass on SQLite **and** PostgreSQL locally before pushing.
+adapters, with the pinned ActiveRecord versions (`gemfiles/activerecord-7.1.gemfile`,
+`gemfiles/activerecord-8.0.gemfile`) on SQLite. Changes must pass on SQLite **and**
+PostgreSQL locally before pushing.
 
 The test schema (`spec/support/database.rb`) is indexed like a production schema
 - unique indexes on `has_one` foreign keys, composites for the paged list query,
