@@ -1,39 +1,43 @@
 #!/usr/bin/env python3
-"""Render docs/demo.gif — a three-beat walkthrough of a Pluckr query."""
+"""Render docs/demo.gif — a three-beat walkthrough of a Pluckr query.
+
+Drawn at 2× then downsampled to 1440×810 so type stays sharp on a retina README.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent
 OUT_GIF = ROOT / "demo.gif"
-PREVIEW = ROOT / "demo-preview.png"
 
-W, H = 960, 540
-FPS = 12
+# Logical layout is 960×540. Draw at 2×, export at 1.5× (1440×810).
+LW, LH = 960, 540
+DRAW = 2
+OUT = 1.5
+W, H = int(LW * DRAW), int(LH * DRAW)
+OUT_SIZE = (int(LW * OUT), int(LH * OUT))
+FPS = 20
 
-# GitHub-dark adjacent, a bit warmer so it doesn't look like a screenshot dump.
-BG = (13, 17, 23)
+BG = (11, 15, 20)
 CARD = (22, 27, 34)
-CARD_INNER = (16, 20, 26)
-BORDER = (48, 54, 61)
-TEXT = (230, 237, 243)
-MUTED = (139, 148, 158)
-DIM = (88, 96, 108)
-ACCENT = (63, 185, 132)
-AMBER = (210, 168, 92)
-RUBY_KW = (255, 123, 114)
+CARD_INNER = (15, 19, 25)
+BORDER = (52, 59, 68)
+HAIR = (36, 42, 50)
+TEXT = (233, 238, 244)
+MUTED = (148, 157, 168)
+DIM = (90, 99, 111)
+ACCENT = (57, 196, 138)
+AMBER = (224, 176, 90)
+RUBY_KW = (255, 128, 118)
 RUBY_NAME = (210, 168, 255)
 RUBY_SYM = (121, 192, 255)
-RUBY_STR = (165, 214, 132)
 SQL_KW = (121, 192, 255)
 SQL_FN = (210, 168, 255)
-SQL_STR = (165, 214, 132)
-RESULT_KEY = (121, 192, 255)
-RESULT_STR = (165, 214, 132)
-RESULT_NUM = (210, 168, 92)
+STR = (163, 217, 140)
+NUM = (224, 176, 90)
 
 RUBY_KEYWORDS = {
     "class", "source", "schema", "do", "end", "field", "one", "exists", "count"
@@ -89,29 +93,19 @@ STEPS = [
 ]
 
 
-def font(path: str, size: int, index: int = 0) -> ImageFont.FreeTypeFont:
-    try:
-        return ImageFont.truetype(path, size, index=index)
-    except OSError:
-        return ImageFont.truetype(path, size)
+def px(v: float) -> int:
+    return int(round(v * DRAW))
+
+
+def font(path: str, size: float, index: int = 0) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(path, px(size), index=index)
 
 
 FONT_UI = font("/System/Library/Fonts/SFNS.ttf", 15)
-FONT_UI_SM = font("/System/Library/Fonts/SFNS.ttf", 13)
-FONT_TITLE = font("/System/Library/Fonts/SFNS.ttf", 18)
-FONT_CODE = font("/System/Library/Fonts/SFNSMono.ttf", 15)
-FONT_CODE_SM = font("/System/Library/Fonts/SFNSMono.ttf", 13)
-FONT_BADGE = font("/System/Library/Fonts/SFNS.ttf", 12)
-
-
-def rounded(draw: ImageDraw.ImageDraw, box, radius, fill, outline=None, width=1):
-    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
-
-
-def lerp(a, b, t):
-    t = max(0.0, min(1.0, t))
-    t = t * t * (3 - 2 * t)
-    return a + (b - a) * t
+FONT_UI_SM = font("/System/Library/Fonts/SFNS.ttf", 13.5)
+FONT_TITLE = font("/System/Library/Fonts/SFNS.ttf", 20)
+FONT_CODE = font("/System/Library/Fonts/SFNSMono.ttf", 15.5)
+FONT_BADGE = font("/System/Library/Fonts/SFNS.ttf", 12.5)
 
 
 def mix(c1, c2, t):
@@ -119,10 +113,22 @@ def mix(c1, c2, t):
     return tuple(int(a + (b - a) * t) for a, b in zip(c1, c2))
 
 
+def box(x0, y0, x1, y1):
+    return (px(x0), px(y0), px(x1), px(y1))
+
+
+def rounded(draw, coords, radius, fill, outline=None, width=1.0):
+    draw.rounded_rectangle(
+        box(*coords) if len(coords) == 4 and not isinstance(coords[0], tuple) else coords,
+        radius=px(radius),
+        fill=fill,
+        outline=outline,
+        width=max(1, px(width)),
+    )
+
+
 def tokenize_ruby(line: str):
-    tokens = []
-    i = 0
-    n = len(line)
+    tokens, i, n = [], 0, len(line)
     while i < n:
         ch = line[i]
         if ch in " \t":
@@ -145,7 +151,7 @@ def tokenize_ruby(line: str):
             while j < n and line[j] != ch:
                 j += 1
             j = min(n, j + 1)
-            tokens.append((line[i:j], RUBY_STR))
+            tokens.append((line[i:j], STR))
             i = j
         elif ch.isalnum() or ch == "_":
             j = i
@@ -153,13 +159,14 @@ def tokenize_ruby(line: str):
                 j += 1
             word = line[i:j]
             if word in RUBY_KEYWORDS:
-                tokens.append((word, RUBY_KW))
+                color = RUBY_KW
             elif word in {"UserSummary", "Pluckr", "Query", "User"}:
-                tokens.append((word, RUBY_NAME))
+                color = RUBY_NAME
             elif word in {"true", "false", "nil"}:
-                tokens.append((word, AMBER))
+                color = AMBER
             else:
-                tokens.append((word, TEXT))
+                color = TEXT
+            tokens.append((word, color))
             i = j
         else:
             tokens.append((ch, DIM))
@@ -168,9 +175,7 @@ def tokenize_ruby(line: str):
 
 
 def tokenize_sql(line: str):
-    tokens = []
-    i = 0
-    n = len(line)
+    tokens, i, n = [], 0, len(line)
     while i < n:
         ch = line[i]
         if ch in " \t":
@@ -184,7 +189,7 @@ def tokenize_sql(line: str):
             while j < n and line[j] != '"':
                 j += 1
             j = min(n, j + 1)
-            tokens.append((line[i:j], SQL_STR))
+            tokens.append((line[i:j], STR))
             i = j
         elif ch.isalnum() or ch == "_":
             j = i
@@ -193,11 +198,12 @@ def tokenize_sql(line: str):
             word = line[i:j]
             upper = word.upper()
             if upper in SQL_KEYWORDS:
-                tokens.append((word, SQL_KW))
+                color = SQL_KW
             elif upper in SQL_FUNCS:
-                tokens.append((word, SQL_FN))
+                color = SQL_FN
             else:
-                tokens.append((word, TEXT))
+                color = TEXT
+            tokens.append((word, color))
             i = j
         else:
             tokens.append((ch, DIM))
@@ -206,9 +212,7 @@ def tokenize_sql(line: str):
 
 
 def tokenize_result(line: str):
-    tokens = []
-    i = 0
-    n = len(line)
+    tokens, i, n = [], 0, len(line)
     while i < n:
         ch = line[i]
         if ch in " \t":
@@ -222,13 +226,13 @@ def tokenize_result(line: str):
             while j < n and line[j] != '"':
                 j += 1
             j = min(n, j + 1)
-            tokens.append((line[i:j], RESULT_STR))
+            tokens.append((line[i:j], STR))
             i = j
         elif ch.isdigit():
             j = i
             while j < n and (line[j].isdigit() or line[j] == "."):
                 j += 1
-            tokens.append((line[i:j], RESULT_NUM))
+            tokens.append((line[i:j], NUM))
             i = j
         elif ch.isalpha() or ch == "_":
             j = i
@@ -237,11 +241,12 @@ def tokenize_result(line: str):
             word = line[i:j]
             nxt = line[j] if j < n else ""
             if word in {"true", "false", "nil"}:
-                tokens.append((word, AMBER))
+                color = AMBER
             elif nxt == ":":
-                tokens.append((word, RESULT_KEY))
+                color = RUBY_SYM
             else:
-                tokens.append((word, TEXT))
+                color = TEXT
+            tokens.append((word, color))
             i = j
         else:
             tokens.append((ch, DIM))
@@ -250,153 +255,177 @@ def tokenize_result(line: str):
 
 
 def draw_tokens(draw, x, y, tokens, font_, alpha=255):
+    x, y = px(x), px(y)
     for text, color in tokens:
         fill = TEXT if color is None else color
         if alpha < 255:
             fill = mix(CARD_INNER, fill, alpha / 255)
         draw.text((x, y), text, font=font_, fill=fill)
         x += draw.textlength(text, font=font_)
+    return x / DRAW
 
 
-def draw_chrome(draw: ImageDraw.ImageDraw, active: int, caption: str, caption_alpha=255, badge: str | None = None):
-    draw.rectangle((0, 0, W, H), fill=BG)
+def shadow_window(base: Image.Image):
+    """Soft drop shadow so the window lifts off the page."""
+    mask = Image.new("L", (W, H), 0)
+    mdraw = ImageDraw.Draw(mask)
+    mdraw.rounded_rectangle(box(32, 28, LW - 28, LH - 20), radius=px(16), fill=140)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=px(7)))
+    shade = Image.new("RGB", (W, H), (0, 0, 0))
+    return Image.composite(shade, base, mask)
 
-    # Window
-    rounded(draw, (28, 22, W - 28, H - 22), 16, CARD, BORDER, 1)
 
-    # Title row
-    draw.text((52, 40), "Pluckr", font=FONT_TITLE, fill=TEXT)
-    draw.text((118, 43), "one statement  ·  frozen result", font=FONT_UI_SM, fill=MUTED)
+def draw_chrome(draw: ImageDraw.ImageDraw, active: int, caption: str, badge: str | None = None):
+    rounded(draw, (28, 22, LW - 28, LH - 22), 16, CARD, BORDER, 1.25)
 
-    # Step pills
-    x = 52
-    y = 78
+    # Accent bar under the title, marks the active step.
+    draw.text((52, 38), "Pluckr", font=FONT_TITLE, fill=TEXT)
+    draw.text((140, 43), "one statement   ·   frozen result", font=FONT_UI_SM, fill=MUTED)
+
+    x, y = 52, 78
     for i, (num, label, _) in enumerate(STEPS):
         on = i == active
-        pill_w = 92 if i == 1 else 86
-        fill = mix(CARD, ACCENT, 0.18) if on else CARD_INNER
-        outline = ACCENT if on else BORDER
-        rounded(draw, (x, y, x + pill_w, y + 28), 14, fill, outline, 1)
-        nfill = ACCENT if on else DIM
-        lfill = TEXT if on else MUTED
-        draw.text((x + 12, y + 6), num, font=FONT_BADGE, fill=nfill)
-        draw.text((x + 28, y + 5), label, font=FONT_UI_SM, fill=lfill)
-        x += pill_w + 10
+        pill_w = 100 if i == 1 else 94
+        fill = mix(CARD, ACCENT, 0.22) if on else mix(CARD, CARD_INNER, 0.6)
+        outline = ACCENT if on else HAIR
+        rounded(draw, (x, y, x + pill_w, y + 30), 15, fill, outline, 1.25)
+        draw.text((x + 14, y + 6), num, font=FONT_BADGE, fill=ACCENT if on else DIM)
+        draw.text((x + 30, y + 5), label, font=FONT_UI_SM, fill=TEXT if on else MUTED)
+        x += pill_w + 12
         if i < 2:
-            draw.text((x - 8, y + 4), "→", font=FONT_UI, fill=DIM)
-            x += 8
+            draw.text((px(x - 6), px(y + 5)), "→", font=FONT_UI, fill=DIM)
+            x += 10
 
-    # Caption under pills
-    cap = mix(BG, MUTED, caption_alpha / 255) if caption_alpha < 255 else MUTED
-    draw.text((52, 118), caption, font=FONT_UI, fill=cap)
+    draw.text((52, 120), caption, font=FONT_UI, fill=MUTED)
 
     if badge:
-        bw = 112
-        bx1 = W - 48 - bw
-        rounded(draw, (bx1, 114, bx1 + bw, 136), 8, mix(CARD, ACCENT, 0.16), ACCENT, 1)
-        draw.text((bx1 + 10, 117), badge, font=FONT_BADGE, fill=ACCENT)
+        bw = 124
+        bx1 = LW - 52 - bw
+        rounded(draw, (bx1, 116, bx1 + bw, 140), 9, mix(CARD, ACCENT, 0.18), ACCENT, 1.25)
+        draw.text((bx1 + 12, 120), badge, font=FONT_BADGE, fill=ACCENT)
 
-    # Editor card
-    rounded(draw, (48, 148, W - 48, H - 48), 12, CARD_INNER, BORDER, 1)
+    rounded(draw, (48, 152, LW - 48, LH - 48), 12, CARD_INNER, HAIR, 1.15)
+    # hairline under the editor top, like a tab bar
+    draw.line([px(60), px(152), px(LW - 60), px(152)], fill=mix(HAIR, ACCENT, 0.35 if active == 1 else 0), width=px(1.5))
 
 
-def draw_scene(active: int, visible_lines: int, extra_badge: str | None = None, line_alpha=255):
+def draw_scene(active: int, visible_lines: int, extra_badge: str | None = None, caret=False):
     img = Image.new("RGB", (W, H), BG)
+    img = shadow_window(img)
     draw = ImageDraw.Draw(img)
     _, _, caption = STEPS[active]
     draw_chrome(draw, active, caption, badge=extra_badge)
 
     body = (CODE, SQL, RESULT)[active]
     tokenizer = (tokenize_ruby, tokenize_sql, tokenize_result)[active]
-    code_font = FONT_CODE if active != 1 else FONT_CODE_SM
     lines = body.split("\n")
     shown = lines[:visible_lines]
 
-    x0, y0 = 68, 168
-    lh = 21 if active == 1 else 22
+    x0, y0 = 94, 172
+    gutter = 64
+    lh = 22.5
     for i, line in enumerate(shown):
-        alpha = 255 if i < visible_lines - 1 else line_alpha
-        draw_tokens(draw, x0, y0 + i * lh, tokenizer(line), code_font, alpha=alpha)
+        yy = y0 + i * lh
+        draw.text((px(gutter), px(yy)), f"{i + 1}", font=FONT_BADGE, fill=mix(CARD_INNER, DIM, 0.7))
+        end_x = draw_tokens(draw, x0, yy, tokenizer(line), FONT_CODE)
+        if caret and i == visible_lines - 1:
+            cx, cy = px(end_x + 1), px(yy + 2)
+            draw.rectangle((cx, cy, cx + px(2), cy + px(16)), fill=ACCENT)
 
-    if active == 2 and visible_lines >= len(body.split("\n")):
-        note = "user.email    user.subscription.name    user.videos_count"
-        draw.text((68, H - 76), note, font=FONT_UI_SM, fill=DIM)
+    if active == 2 and visible_lines >= len(lines):
+        draw.text(
+            (px(86), px(LH - 78)),
+            "user.email     user.subscription.name     user.videos_count",
+            font=FONT_UI_SM,
+            fill=DIM,
+        )
 
     return img
 
 
-def hold(frames, img, seconds):
-    frames.extend([img] * max(1, int(seconds * FPS)))
+def downsample(im: Image.Image) -> Image.Image:
+    return im.resize(OUT_SIZE, Image.Resampling.LANCZOS)
 
 
-def fade(frames, a: Image.Image, b: Image.Image, seconds=0.28):
-    n = max(2, int(seconds * FPS))
+def hold(frames, durations, img, seconds):
+    frames.append(img)
+    durations.append(max(1, int(seconds * 1000)))
+
+
+def fade(frames, durations, a: Image.Image, b: Image.Image, seconds=0.28):
+    n = max(3, int(seconds * FPS))
+    step = int(seconds * 1000 / n)
     for i in range(1, n + 1):
         t = i / n
-        frames.append(Image.blend(a, b, t * t * (3 - 2 * t)))
+        t = t * t * (3 - 2 * t)
+        frames.append(Image.blend(a, b, t))
+        durations.append(step)
 
 
-def reveal(frames, active: int, text: str, extra_badge=None, per_line=0.07, hold_end=1.8):
+def reveal(frames, durations, active: int, text: str, extra_badge=None, hold_end=1.7):
     lines = text.split("\n")
     prev = None
     for n in range(1, len(lines) + 1):
-        img = draw_scene(active, n, extra_badge=extra_badge)
+        img = draw_scene(active, n, extra_badge=extra_badge, caret=n < len(lines))
         frames.append(img)
-        extra = 1 if n < len(lines) else 0
-        frames.extend([img] * extra)
+        durations.append(70 if n < len(lines) else 120)
         prev = img
-    hold(frames, prev, hold_end)
+    # settle without caret
+    prev = draw_scene(active, len(lines), extra_badge=extra_badge, caret=False)
+    hold(frames, durations, prev, hold_end)
     return prev
 
 
-def main():
-    frames: list[Image.Image] = []
-
-    # Scene 1 — query types in
-    last = reveal(frames, 0, CODE, hold_end=1.7)
-
-    empty2 = draw_scene(1, 0, extra_badge="1 statement")
-    fade(frames, last, empty2, 0.32)
-    last = reveal(frames, 1, SQL, extra_badge="1 statement", hold_end=2.1)
-
-    # Scene 3 — result
-    empty3 = draw_scene(2, 0)
-    fade(frames, last, empty3, 0.32)
-    last = reveal(frames, 2, RESULT, hold_end=2.2)
-
-    # Return to query for a clean loop
-    empty1 = draw_scene(0, 0)
-    fade(frames, last, empty1, 0.36)
-
-    # Quantize once from a representative frame so the palette is stable
-    palette_src = frames[len(frames) // 2].quantize(colors=64, method=Image.Quantize.MEDIANCUT)
-    converted = [im.quantize(palette=palette_src, dither=Image.Dither.NONE) for im in frames]
-
-    duration = int(1000 / FPS)
+def encode(frames, durations):
+    small = [downsample(im) for im in frames]
+    palette_src = small[len(small) // 2].quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+    converted = [im.quantize(palette=palette_src, dither=Image.Dither.NONE) for im in small]
     converted[0].save(
         OUT_GIF,
         save_all=True,
         append_images=converted[1:],
-        duration=duration,
+        duration=durations,
         loop=0,
-        optimize=True,
+        optimize=False,
         disposal=2,
     )
 
-    # Static contact sheet for visual QA
-    scenes = [
-        draw_scene(0, len(CODE.split("\n"))),
-        draw_scene(1, len(SQL.split("\n")), extra_badge="1 statement"),
-        draw_scene(2, len(RESULT.split("\n"))),
-    ]
-    sheet = Image.new("RGB", (W, H * 3), BG)
-    for i, sc in enumerate(scenes):
-        sheet.paste(sc, (0, i * H))
-    sheet.save(PREVIEW)
+
+def main():
+    frames: list[Image.Image] = []
+    durations: list[int] = []
+
+    last = reveal(frames, durations, 0, CODE, hold_end=1.65)
+
+    empty2 = draw_scene(1, 0, extra_badge="1 statement")
+    fade(frames, durations, last, empty2, 0.30)
+    last = reveal(frames, durations, 1, SQL, extra_badge="1 statement", hold_end=2.05)
+
+    empty3 = draw_scene(2, 0)
+    fade(frames, durations, last, empty3, 0.30)
+    last = reveal(frames, durations, 2, RESULT, hold_end=2.15)
+
+    empty1 = draw_scene(0, 0)
+    fade(frames, durations, last, empty1, 0.34)
+
+    encode(frames, durations)
+    gifsicle = Path("/opt/homebrew/bin/gifsicle")
+    if gifsicle.exists():
+        import subprocess
+
+        subprocess.check_call(
+            [str(gifsicle), "-O3", "--no-warnings", str(OUT_GIF), "-o", str(OUT_GIF)]
+        )
+
+    # Full-res PNG of the three beats, no GIF palette, for visual QA.
+    qa = Path("/tmp/pluckr-demo-qa")
+    qa.mkdir(exist_ok=True)
+    downsample(draw_scene(0, len(CODE.split("\n")))).save(qa / "1-query.png")
+    downsample(draw_scene(1, len(SQL.split("\n")), extra_badge="1 statement")).save(qa / "2-sql.png")
+    downsample(draw_scene(2, len(RESULT.split("\n")))).save(qa / "3-result.png")
 
     size_kb = OUT_GIF.stat().st_size / 1024
-    print(f"wrote {OUT_GIF}  {len(converted)} frames  {size_kb:.0f} KB")
-    print(f"wrote {PREVIEW}")
+    print(f"wrote {OUT_GIF}  {len(frames)} frames  {OUT_SIZE[0]}×{OUT_SIZE[1]}  {size_kb:.0f} KB")
 
 
 if __name__ == "__main__":
