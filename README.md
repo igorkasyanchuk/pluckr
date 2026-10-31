@@ -2,6 +2,13 @@
 
 ![Query → one SQL statement → frozen result](docs/demo.gif)
 
+<a href="https://igorkasyanchuk.com/apps?ref=pluckr">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://igorkasyanchuk.com/versions/v1/banner-dark.svg">
+    <img src="https://igorkasyanchuk.com/versions/v1/banner-light.svg" width="720" alt="More tools from the author: Laki, DiffNotes and more. See all projects at igorkasyanchuk.com/apps">
+  </picture>
+</a>
+
 A declarative read-query layer for ActiveRecord. Declare the shape, get one SQL
 statement and a frozen, ActiveRecord-free object.
 
